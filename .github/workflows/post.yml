@@ -2,12 +2,22 @@ name: Post Facts
 
 on:
   schedule:
-    # 04:00 UTC = 09:00 Asia/Tashkent (UTC+5, DST yo'q)
+    # 04:00 UTC = 09:00 Asia/Tashkent (UTC+5, DST yo'q) — fact post
     - cron: "0 4 * * *"
-  workflow_dispatch: {}   # Actions sahifasidan qo'lda ham ishga tushirish mumkin
+    # 15:00 UTC = 20:00 Asia/Tashkent — flex/countdown post
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      post_type:
+        description: "Qaysi post turini qo'lda yubormoqchisiz?"
+        type: choice
+        options:
+          - facts
+          - flex
+        default: facts
 
 permissions:
-  contents: write   # recent_facts.json'ni commit qilib qaytarish uchun
+  contents: write   # recent_facts.json / recent_flex.json'ni commit qilib qaytarish uchun
 
 jobs:
   post:
@@ -21,8 +31,24 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Fakt postini yuborish
-        run: python -c "import asyncio; from main import send_fact_post; asyncio.run(send_fact_post())"
+      - name: Post turini aniqlash
+        id: which
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 15 * * *" ]; then
+            echo "target=flex" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then
+            echo "target=facts" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=${{ github.event.inputs.post_type || 'facts' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Postni yuborish
+        run: |
+          if [ "${{ steps.which.outputs.target }}" = "flex" ]; then
+            python -c "import asyncio; from main import send_flex_countdown_post; asyncio.run(send_flex_countdown_post())"
+          else
+            python -c "import asyncio; from main import send_fact_post; asyncio.run(send_fact_post())"
+          fi
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
@@ -31,10 +57,10 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
 
-      - name: recent_facts.json ni repoga qaytarish
+      - name: recent_*.json ni repoga qaytarish
         run: |
           git config user.name "facts-bot"
           git config user.email "facts-bot@users.noreply.github.com"
-          git add recent_facts.json
-          git diff --cached --quiet || git commit -m "chore: update recent_facts.json [skip ci]"
+          git add recent_facts.json recent_flex.json
+          git diff --cached --quiet || git commit -m "chore: update recent facts/flex [skip ci]"
           git push

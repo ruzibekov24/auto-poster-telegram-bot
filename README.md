@@ -1,6 +1,6 @@
 # Telegram Facts Bot
 
-Telegram kanalga (masalan `@MyHarvardPath`) har kuni soat 09:00da (Toshkent vaqti) avtomatik "fact" postlari tashlaydigan bot. Fakt matni har safar Google Gemini API orqali yangidan generatsiya qilinadi, shu sababli har bir post noyob va turli xil bo'ladi.
+Telegram kanalga (masalan `@MyHarvardPath`) har kuni ikkita avtomatik post tashlaydigan bot: soat **09:00**da qiziqarli "fact" posti, soat **20:00**da esa top universitetlarga ariza topshirish haqida "flex/countdown" posti (Toshkent vaqti). Matnlar har safar Google Gemini API orqali yangidan generatsiya qilinadi, shu sababli har bir post noyob va turli xil bo'ladi.
 
 ## Fayllar
 
@@ -8,6 +8,7 @@ Telegram kanalga (masalan `@MyHarvardPath`) har kuni soat 09:00da (Toshkent vaqt
 - `requirements.txt` — kerakli Python kutubxonalari
 - `.env.example` — konfiguratsiya namunasi
 - `recent_facts.json` — bot avtomatik yaratadi, oxirgi 20 ta faktni saqlaydi (takrorlanmaslik uchun)
+- `recent_flex.json` — bot avtomatik yaratadi, oxirgi 20 ta flex/mini-faktni saqlaydi
 - `bot.log` — bot avtomatik yaratadi, barcha loglar shu yerga yoziladi
 
 ## 1. Lokal o'rnatish
@@ -189,11 +190,34 @@ HEALTHCHECK_URL=https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 ## 5. Sozlamalarni o'zgartirish
 
-- **Post vaqtlari**: `main.py` ichidagi `POST_TIMES` ro'yxatini o'zgartiring.
-- **Kategoriyalar**: `main.py` ichidagi `CATEGORIES` ro'yxatiga yangi kategoriya qo'shishingiz yoki mavjudlarini tahrirlashingiz mumkin.
+- **Post vaqtlari**: `main.py` ichidagi `POST_TIMES` (fact post) va `FLEX_POST_TIME` (countdown post) o'zgaruvchilarini o'zgartiring. GitHub Actions orqali ishlatayotgan bo'lsangiz, `.github/workflows/post.yml` faylidagi `cron` qatorlarini ham mos ravishda yangilang (vaqt UTC'da yoziladi).
+- **Kategoriyalar**: `main.py` ichidagi `CATEGORY_EMOJI` lug'atiga yangi kategoriya+emoji qo'shishingiz yoki mavjudlarini tahrirlashingiz mumkin.
 - **Gemini modeli**: `GEMINI_MODEL` o'zgaruvchisi orqali boshqariladi.
 
-## 6. Muammolarni bartaraf etish
+## 6. Flex/Countdown post (universitet ariza muddatlari)
+
+Har kuni soat **20:00 (Toshkent)**da kanalga qo'shimcha post ketadi: top universitetlarga (Harvard, Ivy League) ariza topshirish haqida flex/mini-fakt + "necha kun qoldi" countdown. Bu `send_flex_countdown_post()` funksiyasi orqali ishlaydi (`main.py`).
+
+### 6.1. Hozirgi holat: TAXMINIY countdown
+
+`main.py`dagi `EXACT_DEADLINES` ro'yxati hozircha **bo'sh** — shuning uchun bot `APPROX_ROUNDS`da yozilgan, top universitetlarda har yili taqriban takrorlanadigan sanalarga (Early Action ~1-noyabr, Regular Decision ~1-yanvar) asoslanib **taxminiy** countdown ko'rsatadi va postda buni ochiq yozadi ("Taxminan ~N kun qoldi ... aniq sana e'lon qilinganda yangilanadi").
+
+> Kunlar soni har doim **Python tomonidan aniq hisoblanadi** (AI emas) — shu sababli son hech qachon soxta yoki noto'g'ri bo'lmaydi, faqat qaysi sana asos qilib olinganini (aniq/taxminiy) belgilash kerak.
+
+### 6.2. Aniq muddatlar ma'lum bo'lganda
+
+Universitetning rasmiy ariza muddati e'lon qilingach, `main.py`dagi `EXACT_DEADLINES` ro'yxatiga qo'shing:
+
+```python
+EXACT_DEADLINES: list[dict] = [
+    {"university": "Harvard", "round": "Regular Decision", "date": "2027-01-01"},
+    {"university": "MIT", "round": "Early Action", "date": "2026-11-01"},
+]
+```
+
+Ro'yxat to'ldirilishi bilanoq bot avtomatik ravishda **aniq** countdown'ga o'tadi (eng yaqin muddatni tanlaydi) va "Taxminan" so'zini olib tashlaydi.
+
+## 7. Muammolarni bartaraf etish
 
 | Muammo | Yechim |
 |---|---|
