@@ -10,10 +10,12 @@ Ish tartibi:
 """
 
 import asyncio
+import html
 import json
 import logging
 import os
 import random
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from google import genai
 from telegram import Bot
+from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 # ----------------------------------------------------------------------------
@@ -54,13 +57,15 @@ LOG_FILE = BASE_DIR / "bot.log"
 MAX_RECENT_FACTS = 20
 MAX_GENERATION_ATTEMPTS = 3
 
-CATEGORIES = [
-    "Crazy facts (fizika, koinot, inson tanasi, hayvonot dunyosi haqida hayratlanarli faktlar)",
-    "Fun facts (kulgili, kutilmagan statistikalar)",
-    "About love (lowkey/hazil uslubda, jiddiy emas — sevgi psixologiyasi haqida kulgili tarzda)",
-    "Random weird facts (g'alati, kam ma'lum faktlar)",
-    "Tech/space facts",
-]
+# Har bir kategoriya uchun mos emoji — kanal mention qatorida ishlatiladi
+CATEGORY_EMOJI = {
+    "Crazy facts (fizika, koinot, inson tanasi, hayvonot dunyosi haqida hayratlanarli faktlar)": "🤯",
+    "Fun facts (kulgili, kutilmagan statistikalar)": "😂",
+    "About love (lowkey/hazil uslubda, jiddiy emas — sevgi psixologiyasi haqida kulgili tarzda)": "💘",
+    "Random weird facts (g'alati, kam ma'lum faktlar)": "👽",
+    "Tech/space facts": "🚀",
+}
+CATEGORIES = list(CATEGORY_EMOJI.keys())
 
 HOOKS = ["#Facts", "🧠 Did you know?", "🤯 Fact time:", "👀 Ever wondered?"]
 
@@ -109,6 +114,9 @@ def save_recent_fact(fact_text: str) -> None:
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
+SPLIT_MARKER = "|||"
+
+
 def build_prompt(category: str, avoid: list[str]) -> str:
     avoid_block = ""
     if avoid:
@@ -123,15 +131,26 @@ Kanal auditoriyasi: Gen-Z, fun va hazil-mutoyibali uslubni yaxshi ko'radi.
 
 Kategoriya: {category}
 
-Talablar:
-- 1-3 ta qisqa jumlada qiziqarli/kulgili fakt yoz (ingliz tilida).
-- Fakt haqiqiy va qiziqarli bo'lsin, lekin jiddiy/akademik ohangda emas.
-- Oxirida bitta qisqa, kulgili yoki relatable punchline qo'sh (1 ta mos emoji bilan).
-- Matn ichida sarlavha, hashtag yoki username YOZMA — faqat fakt matni va punchline.
-- Javobni faqat tayyor matn sifatida qaytar, boshqa hech qanday izoh yoki formatlashsiz.{avoid_block}"""
+Ikkita qism yoz (ingliz tilida):
+
+1) FAKT: 1-3 ta qisqa jumlada qiziqarli/kulgili fakt, haqiqiy va jiddiy/akademik bo'lmagan
+   ohangda. Oxirida bitta qisqa, kulgili yoki relatable punchline qo'sh (1 ta mos emoji bilan).
+   Matn ichidagi 1-2 ta ENG kalit/muhim so'z yoki qisqa iborani **so'z** shaklida (ikkita
+   yulduzcha orasida) belgila — bular Telegram'da qalin (bold) qilib chiqadi. Masalan:
+   "Ignoring someone actually takes **MORE** brain energy than replying." Ko'p urg'u berma,
+   faqat eng ta'sirli qismga.
+
+2) REAKSIYA: shu faktga o'quvchining lahzalik hissiy reaksiyasi — juda qisqa (3-6 so'z),
+   hazil-mutoyibali, emoji bilan boyitilgan jumla (masalan "not me screaming rn 💀" kabi
+   uslubda). Bu qator Telegram'da spoiler (blur) ostida yashirinadi.
+
+Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
+<FAKT matni>
+{SPLIT_MARKER}
+<REAKSIYA matni>{avoid_block}"""
 
 
-def generate_fact_text(category: str) -> str:
+def generate_fact_and_reaction(category: str) -> tuple[str, str]:
     recent = load_recent_facts()
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
@@ -140,22 +159,44 @@ def generate_fact_text(category: str) -> str:
             model=GEMINI_MODEL,
             contents=prompt,
         )
-        fact_text = response.text.strip()
+        raw = response.text.strip()
+        fact_part, _, reaction_part = raw.partition(SPLIT_MARKER)
+        fact_text = fact_part.strip()
+        reaction_text = reaction_part.strip() or "🤯"
 
         if fact_text not in recent:
-            return fact_text
+            return fact_text, reaction_text
 
         logger.info("Takroriy fakt chiqdi, qayta urinish (%s/%s)", attempt, MAX_GENERATION_ATTEMPTS)
 
     # Barcha urinishlardan keyin ham takror chiqsa, oxirgi natijani ishlatamiz
     logger.warning("Takrorlanmas fakt topilmadi, oxirgi generatsiya ishlatiladi")
-    return fact_text
+    return fact_text, reaction_text
 
 
-def build_post_text(category: str) -> str:
+def apply_bold_markup(text: str) -> str:
+    """HTML-escape qilingan matndagi **so'z** belgilarini <b>so'z</b>ga aylantiradi."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+
+
+def build_post_text(category: str) -> tuple[str, str]:
+    """Post matnini (HTML formatida) va recent_facts.json uchun toza fakt matnini qaytaradi."""
     hook = random.choice(HOOKS)
-    fact = generate_fact_text(category)
-    return f"{hook}\n{fact}\n\n#Facts\n{CHANNEL_USERNAME}"
+    fact_text, reaction_text = generate_fact_and_reaction(category)
+    emoji = CATEGORY_EMOJI.get(category, "🚀")
+
+    fact_html = apply_bold_markup(html.escape(fact_text))
+
+    post_html = (
+        f"{html.escape(hook)}\n"
+        f"{fact_html}\n\n"
+        f"<tg-spoiler>{html.escape(reaction_text)}</tg-spoiler>\n\n"
+        f"#Facts\n"
+        f"{emoji} {html.escape(CHANNEL_USERNAME)}"
+    )
+    # recent_facts.json'ga **belgilarisiz** toza matnni saqlaymiz
+    plain_fact = fact_text.replace("**", "")
+    return post_html, plain_fact
 
 
 # ----------------------------------------------------------------------------
@@ -163,12 +204,12 @@ def build_post_text(category: str) -> str:
 # ----------------------------------------------------------------------------
 
 
-async def notify_admin(bot: Bot, text: str) -> None:
+async def notify_admin(bot: Bot, text: str, parse_mode: str | None = None) -> None:
     """Ixtiyoriy: post natijasi haqida sizga shaxsiy xabar yuboradi (ADMIN_CHAT_ID bo'lsa)."""
     if not ADMIN_CHAT_ID:
         return
     try:
-        await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
+        await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode=parse_mode)
     except TelegramError as e:
         logger.warning("Adminga xabar yuborib bo'lmadi: %s", e)
 
@@ -201,7 +242,7 @@ async def send_fact_post() -> None:
     bot = Bot(token=BOT_TOKEN)
 
     try:
-        post_text = build_post_text(category)
+        post_html, plain_fact = build_post_text(category)
     except Exception as e:
         logger.error("Fakt generatsiya qilishda xatolik: %s", e)
         await notify_admin(bot, f"❌ Fakt generatsiya qilishda xatolik: {e}")
@@ -209,12 +250,14 @@ async def send_fact_post() -> None:
         return
 
     try:
-        await bot.send_message(chat_id=CHANNEL_ID, text=post_text)
-        # Faqat fakt matnini (hook/hashtag/username'siz) recent_facts.json'ga saqlaymiz
-        fact_only = post_text.split("\n", 1)[1].split("\n\n#Facts")[0]
-        save_recent_fact(fact_only)
+        await bot.send_message(chat_id=CHANNEL_ID, text=post_html, parse_mode=ParseMode.HTML)
+        save_recent_fact(plain_fact)
         logger.info("Post muvaffaqiyatli yuborildi: %s", CHANNEL_ID)
-        await notify_admin(bot, f"✅ Post yuborildi ({datetime.now():%Y-%m-%d %H:%M})\n\n{post_text}")
+        await notify_admin(
+            bot,
+            f"✅ Post yuborildi ({datetime.now():%Y-%m-%d %H:%M})\n\n{post_html}",
+            parse_mode=ParseMode.HTML,
+        )
         ping_healthcheck(success=True)
     except TelegramError as e:
         logger.error("Telegramga post yuborishda xatolik: %s", e)
