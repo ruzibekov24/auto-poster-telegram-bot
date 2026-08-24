@@ -16,6 +16,7 @@ import logging
 import os
 import random
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -116,6 +117,26 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 SPLIT_MARKER = "|||"
 
+# Gemini API vaqtinchalik band bo'lib qolsa (503 kabi) qayta urinish sozlamalari
+API_RETRY_ATTEMPTS = 4
+API_RETRY_BASE_DELAY = 3  # soniya, har urinishda ko'payadi: 3s, 6s, 9s...
+
+
+def call_gemini(prompt: str):
+    """Gemini API'ni chaqiradi, vaqtinchalik xatoliklarda (503 va h.k.) qayta urinadi."""
+    last_error: Exception | None = None
+    for attempt in range(1, API_RETRY_ATTEMPTS + 1):
+        try:
+            return gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "Gemini API xatoligi (urinish %s/%s): %s", attempt, API_RETRY_ATTEMPTS, e
+            )
+            if attempt < API_RETRY_ATTEMPTS:
+                time.sleep(API_RETRY_BASE_DELAY * attempt)
+    raise last_error
+
 
 def build_prompt(category: str, avoid: list[str]) -> str:
     avoid_block = ""
@@ -155,10 +176,7 @@ def generate_fact_and_reaction(category: str) -> tuple[str, str]:
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         prompt = build_prompt(category, recent)
-        response = gemini_client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-        )
+        response = call_gemini(prompt)
         raw = response.text.strip()
         fact_part, _, reaction_part = raw.partition(SPLIT_MARKER)
         fact_text = fact_part.strip()
