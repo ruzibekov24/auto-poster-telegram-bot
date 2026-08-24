@@ -1,10 +1,10 @@
 # Telegram Facts Bot
 
-Telegram kanalga (masalan `@MyHarvardPath`) har kuni belgilangan vaqtlarda (10:00, 16:00, 22:00 — Toshkent vaqti) avtomatik "fact" postlari tashlaydigan bot. Fakt matni har safar Anthropic Claude API orqali yangidan generatsiya qilinadi, shu sababli har bir post noyob va turli xil bo'ladi.
+Telegram kanalga (masalan `@MyHarvardPath`) har kuni soat 09:00da (Toshkent vaqti) avtomatik "fact" postlari tashlaydigan bot. Fakt matni har safar Google Gemini API orqali yangidan generatsiya qilinadi, shu sababli har bir post noyob va turli xil bo'ladi.
 
 ## Fayllar
 
-- `main.py` — asosiy skript (scheduler, Claude API chaqiruvi, Telegramga yuborish)
+- `main.py` — asosiy skript (scheduler, Gemini API chaqiruvi, Telegramga yuborish)
 - `requirements.txt` — kerakli Python kutubxonalari
 - `.env.example` — konfiguratsiya namunasi
 - `recent_facts.json` — bot avtomatik yaratadi, oxirgi 20 ta faktni saqlaydi (takrorlanmaslik uchun)
@@ -49,7 +49,7 @@ cp .env.example .env
 
 - **BOT_TOKEN** — [@BotFather](https://t.me/BotFather) orqali yaratilgan bot tokeni
 - **CHANNEL_ID** — kanal username'i (`@MyHarvardPath`) yoki raqamli ID (`-100...`)
-- **ANTHROPIC_API_KEY** — [console.anthropic.com](https://console.anthropic.com) dan olinadigan API kalit
+- **GEMINI_API_KEY** — [aistudio.google.com/apikey](https://aistudio.google.com/apikey) dan bepul olinadigan API kalit
 - **CHANNEL_USERNAME** — postlar oxirida ko'rsatiladigan username
 
 > **MUHIM:** Botni kanalga **admin** qilib qo'shishni unutmang, aks holda u post yubora olmaydi (`Post Messages` huquqi yetarli).
@@ -130,7 +130,7 @@ GitHub repozitoriyangizda: **Settings → Secrets and variables → Actions → 
 |---|---|
 | `BOT_TOKEN` | Ha |
 | `CHANNEL_ID` | Ha |
-| `ANTHROPIC_API_KEY` | Ha |
+| `GEMINI_API_KEY` | Ha |
 | `CHANNEL_USERNAME` | Ha |
 | `ADMIN_CHAT_ID` | Yo'q (ixtiyoriy) |
 | `HEALTHCHECK_URL` | Yo'q (ixtiyoriy) |
@@ -191,7 +191,7 @@ HEALTHCHECK_URL=https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 - **Post vaqtlari**: `main.py` ichidagi `POST_TIMES` ro'yxatini o'zgartiring.
 - **Kategoriyalar**: `main.py` ichidagi `CATEGORIES` ro'yxatiga yangi kategoriya qo'shishingiz yoki mavjudlarini tahrirlashingiz mumkin.
-- **Claude modeli**: `CLAUDE_MODEL` o'zgaruvchisi orqali boshqariladi.
+- **Gemini modeli**: `GEMINI_MODEL` o'zgaruvchisi orqali boshqariladi.
 
 ## 6. Muammolarni bartaraf etish
 
@@ -199,5 +199,5 @@ HEALTHCHECK_URL=https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 |---|---|
 | Post yuborilmayapti | `bot.log` faylini tekshiring, xatolik sababi shu yerda yoziladi |
 | `Chat not found` xatosi | Bot kanalga admin sifatida qo'shilganiga ishonch hosil qiling |
-| Anthropic API xatosi | `ANTHROPIC_API_KEY` to'g'riligini va balansni tekshiring |
+| Gemini API xatosi | `GEMINI_API_KEY` to'g'riligini va kunlik bepul limitni tekshiring |
 | Takroriy faktlar chiqyapti | `recent_facts.json` faylini o'chirmang, u takrorlanishni oldini oladi |

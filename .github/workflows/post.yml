@@ -26,7 +26,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}

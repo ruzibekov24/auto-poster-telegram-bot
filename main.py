@@ -4,7 +4,7 @@ Telegram kanaliga avtomatik "fact" postlari tashlaydigan bot.
 Ish tartibi:
 1. Kuniga belgilangan vaqtlarda (APScheduler cron) ishga tushadi.
 2. Tasodifiy kategoriya tanlanadi.
-3. Anthropic Claude API orqali shu kategoriyada yangi fakt matni generatsiya qilinadi.
+3. Google Gemini API orqali shu kategoriyada yangi fakt matni generatsiya qilinadi.
 4. Oxirgi 20 ta fakt bilan solishtirilib, takrorlanish bo'lsa qayta generatsiya qilinadi.
 5. Tayyor post Telegram Bot API orqali kanalga yuboriladi.
 """
@@ -18,10 +18,10 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from anthropic import Anthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
+from google import genai
 from telegram import Bot
 from telegram.error import TelegramError
 
@@ -33,7 +33,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", CHANNEL_ID or "@MyHarvardPath")
 
 # Ixtiyoriy: har bir post natijasi (muvaffaqiyat/xato) haqida shaxsiy xabar olish uchun
@@ -44,7 +44,7 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 # ishdan chiqsa (masalan server o'chib qolsa) ham SIZGA alohida ogohlantirish keladi
 HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL")
 
-CLAUDE_MODEL = "claude-sonnet-5"
+GEMINI_MODEL = "gemini-3.6-flash"
 TIMEZONE = "Asia/Tashkent"
 POST_TIMES = [(9, 0)]  # (soat, minut) — Toshkent vaqti, har kuni soat 9:00 da post
 
@@ -103,10 +103,10 @@ def save_recent_fact(fact_text: str) -> None:
 
 
 # ----------------------------------------------------------------------------
-# Claude orqali fakt generatsiya qilish
+# Gemini orqali fakt generatsiya qilish
 # ----------------------------------------------------------------------------
 
-claude_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def build_prompt(category: str, avoid: list[str]) -> str:
@@ -136,12 +136,11 @@ def generate_fact_text(category: str) -> str:
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         prompt = build_prompt(category, recent)
-        response = claude_client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
         )
-        fact_text = response.content[0].text.strip()
+        fact_text = response.text.strip()
 
         if fact_text not in recent:
             return fact_text
@@ -245,9 +244,9 @@ def setup_scheduler() -> AsyncIOScheduler:
 
 
 async def main() -> None:
-    if not BOT_TOKEN or not CHANNEL_ID or not ANTHROPIC_API_KEY:
+    if not BOT_TOKEN or not CHANNEL_ID or not GEMINI_API_KEY:
         logger.error(
-            "BOT_TOKEN, CHANNEL_ID yoki ANTHROPIC_API_KEY topilmadi. .env faylini tekshiring."
+            "BOT_TOKEN, CHANNEL_ID yoki GEMINI_API_KEY topilmadi. .env faylini tekshiring."
         )
         return
 
