@@ -1,6 +1,11 @@
 # Telegram Facts Bot
 
-Telegram kanalga (masalan `@MyHarvardPath`) har kuni ikkita avtomatik post tashlaydigan bot: soat **09:00**da qiziqarli "fact" posti, soat **20:00**da esa top universitetlarga ariza topshirish haqida "flex/countdown" posti (Toshkent vaqti). Matnlar har safar Google Gemini API orqali yangidan generatsiya qilinadi, shu sababli har bir post noyob va turli xil bo'ladi.
+Telegram kanalga (masalan `@MyHarvardPath`) har kuni uchta avtomatik post tashlaydigan bot (Toshkent vaqti):
+- **09:00** — qiziqarli "fact" posti
+- **14:00** — poll/viktorina (tasodifiy: ba'zan oddiy so'rovnoma, ba'zan to'g'ri javobli viktorina)
+- **20:00** — top universitetlarga ariza topshirish haqida "flex/countdown" posti
+
+Matnlar har safar Google Gemini API orqali yangidan generatsiya qilinadi, shu sababli har bir post noyob va turli xil bo'ladi.
 
 ## Fayllar
 
@@ -9,6 +14,7 @@ Telegram kanalga (masalan `@MyHarvardPath`) har kuni ikkita avtomatik post tashl
 - `.env.example` — konfiguratsiya namunasi
 - `recent_facts.json` — bot avtomatik yaratadi, oxirgi 20 ta faktni saqlaydi (takrorlanmaslik uchun)
 - `recent_flex.json` — bot avtomatik yaratadi, oxirgi 20 ta flex/mini-faktni saqlaydi
+- `recent_polls.json` — bot avtomatik yaratadi, oxirgi 20 ta poll savolini saqlaydi
 - `bot.log` — bot avtomatik yaratadi, barcha loglar shu yerga yoziladi
 
 ## 1. Lokal o'rnatish
@@ -190,7 +196,7 @@ HEALTHCHECK_URL=https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 ## 5. Sozlamalarni o'zgartirish
 
-- **Post vaqtlari**: `main.py` ichidagi `POST_TIMES` (fact post) va `FLEX_POST_TIME` (countdown post) o'zgaruvchilarini o'zgartiring. GitHub Actions orqali ishlatayotgan bo'lsangiz, `.github/workflows/post.yml` faylidagi `cron` qatorlarini ham mos ravishda yangilang (vaqt UTC'da yoziladi).
+- **Post vaqtlari**: `main.py` ichidagi `POST_TIMES` (fact post), `POLL_POST_TIME` (poll/viktorina) va `FLEX_POST_TIME` (countdown post) o'zgaruvchilarini o'zgartiring. GitHub Actions orqali ishlatayotgan bo'lsangiz, `.github/workflows/post.yml` faylidagi `cron` qatorlarini ham mos ravishda yangilang (vaqt UTC'da yoziladi).
 - **Kategoriyalar**: `main.py` ichidagi `CATEGORY_EMOJI` lug'atiga yangi kategoriya+emoji qo'shishingiz yoki mavjudlarini tahrirlashingiz mumkin.
 - **Gemini modeli**: `GEMINI_MODEL` o'zgaruvchisi orqali boshqariladi.
 
@@ -217,7 +223,16 @@ EXACT_DEADLINES: list[dict] = [
 
 Ro'yxat to'ldirilishi bilanoq bot avtomatik ravishda **aniq** countdown'ga o'tadi (eng yaqin muddatni tanlaydi) va "Taxminan" so'zini olib tashlaydi.
 
-## 7. Muammolarni bartaraf etish
+## 7. Poll/Viktorina
+
+Har kuni soat **14:00 (Toshkent)**da kanalga Telegram'ning o'z poll funksiyasi orqali (`send_poll_post()`, `main.py`) so'rovnoma ketadi. Har safar tasodifiy ikkitadan biri tanlanadi:
+
+- **Viktorina (quiz)** — 3-4 variantli savol, bitta to'g'ri javob bilan. Foydalanuvchi javob bergach, Telegram avtomatik "to'g'ri/noto'g'ri" ko'rsatadi va qisqa izoh chiqadi.
+- **Oddiy so'rovnoma (poll)** — to'g'ri javobsiz, shunchaki fikr-mulohaza so'raladi (masalan "hozir nima qilyapsiz?" kabi relatable savol).
+
+Mavzu `main.py`dagi `POLL_TOPICS` ro'yxatidan tasodifiy tanlanadi — random fakt/trivia, universitet ariza jarayoni, talaba hayoti yoki umumiy Gen-Z mavzular. Yangi mavzu qo'shish uchun shu ro'yxatga bitta qator qo'shsangiz kifoya.
+
+## 8. Muammolarni bartaraf etish
 
 | Muammo | Yechim |
 |---|---|

@@ -26,8 +26,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types as genai_types
 from telegram import Bot
-from telegram.constants import ParseMode
+from telegram.constants import ParseMode, PollType
 from telegram.error import TelegramError
 
 # ----------------------------------------------------------------------------
@@ -53,10 +54,12 @@ GEMINI_MODEL = "gemini-3.6-flash"
 TIMEZONE = "Asia/Tashkent"
 POST_TIMES = [(9, 0)]  # (soat, minut) — Toshkent vaqti, har kuni soat 9:00 da fact post
 FLEX_POST_TIME = (20, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 20:00 da flex/countdown post
+POLL_POST_TIME = (14, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 14:00 da poll/viktorina
 
 BASE_DIR = Path(__file__).resolve().parent
 RECENT_FACTS_FILE = BASE_DIR / "recent_facts.json"
 RECENT_FLEX_FILE = BASE_DIR / "recent_flex.json"
+RECENT_POLLS_FILE = BASE_DIR / "recent_polls.json"
 LOG_FILE = BASE_DIR / "bot.log"
 MAX_RECENT_FACTS = 20
 MAX_GENERATION_ATTEMPTS = 3
@@ -137,12 +140,15 @@ API_RETRY_ATTEMPTS = 4
 API_RETRY_BASE_DELAY = 3  # soniya, har urinishda ko'payadi: 3s, 6s, 9s...
 
 
-def call_gemini(prompt: str):
+def call_gemini(prompt: str, json_mode: bool = False):
     """Gemini API'ni chaqiradi, vaqtinchalik xatoliklarda (503 va h.k.) qayta urinadi."""
+    config = genai_types.GenerateContentConfig(response_mime_type="application/json") if json_mode else None
     last_error: Exception | None = None
     for attempt in range(1, API_RETRY_ATTEMPTS + 1):
         try:
-            return gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+            return gemini_client.models.generate_content(
+                model=GEMINI_MODEL, contents=prompt, config=config
+            )
         except Exception as e:
             last_error = e
             logger.warning(
@@ -351,6 +357,89 @@ def build_flex_post_text() -> tuple[str, str]:
 
 
 # ----------------------------------------------------------------------------
+# Poll/viktorina generatsiya qilish
+# ----------------------------------------------------------------------------
+
+POLL_TOPICS = [
+    "Random qiziqarli fakt/ilmiy trivia (fizika, koinot, hayvonot dunyosi, inson tanasi)",
+    "Top universitetlarga (Harvard, Ivy League) ariza topshirish jarayoni haqida trivia",
+    "Talaba hayoti, o'qish odatlari haqida hazil-mutoyibali savol",
+    "Gen-Z / kundalik hayot haqida qiziqarli fikr-mulohaza savoli",
+]
+
+
+def build_poll_prompt(poll_type: str, topic: str, avoid: list[str]) -> str:
+    avoid_block = ""
+    if avoid:
+        avoid_list = "\n".join(f"- {q}" for q in avoid[-MAX_RECENT_FACTS:])
+        avoid_block = (
+            "\n\nQuyidagi savollarni TAKRORLAMA, ular allaqachon post qilingan:\n"
+            f"{avoid_list}"
+        )
+
+    if poll_type == "quiz":
+        schema_note = """{
+  "question": "savol matni (ingliz tilida, max 250 belgi)",
+  "options": ["variant1", "variant2", "variant3", "variant4"],
+  "correct_index": 0,
+  "explanation": "to'g'ri javobdan keyin ko'rsatiladigan qisqa qiziqarli izoh (ingliz tilida, max 180 belgi)"
+}
+Bu VIKTORINA — aniq bitta to'g'ri javob bo'lishi shart. "correct_index" — to'g'ri variantning
+"options" ro'yxatidagi (0dan boshlanadigan) o'rni."""
+    else:
+        schema_note = """{
+  "question": "so'rov savoli (ingliz tilida, max 250 belgi)",
+  "options": ["variant1", "variant2", "variant3", "variant4"]
+}
+Bu ODDIY SO'ROVNOMA (opinion poll) — to'g'ri/noto'g'ri javob yo'q, shunchaki o'quvchining
+fikri/tanlovi so'raladi."""
+
+    return f"""Sen Telegram kanali uchun {"viktorina" if poll_type == "quiz" else "so'rovnoma"} tayyorlaydigan
+copywriter'san. Kanal auditoriyasi: Harvard/top universitetlarga tayyorlanayotgan Gen-Z talabalar,
+fun va hazil-mutoyibali uslubni yaxshi ko'radi.
+
+Mavzu: {topic}
+
+Talablar:
+- 3-4 ta qisqa javob varianti (har biri max 80 belgi).
+- Savol va variantlar qiziqarli, jiddiy/akademik bo'lmagan ohangda.
+
+Javobni FAQAT quyidagi JSON formatida qaytar, boshqa hech qanday matn yozma:
+{schema_note}{avoid_block}"""
+
+
+def generate_poll_content(poll_type: str) -> dict:
+    recent = load_recent(RECENT_POLLS_FILE)
+    topic = random.choice(POLL_TOPICS)
+
+    for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+        prompt = build_poll_prompt(poll_type, topic, recent)
+        response = call_gemini(prompt, json_mode=True)
+        data = json.loads(response.text)
+
+        question = data["question"].strip()
+        options = [str(opt).strip() for opt in data["options"]][:10]
+        if len(options) < 2:
+            raise ValueError(f"Gemini juda kam variant qaytardi: {options}")
+
+        if question not in recent:
+            result = {"question": question, "options": options}
+            if poll_type == "quiz":
+                result["correct_index"] = int(data["correct_index"])
+                result["explanation"] = str(data.get("explanation", "")).strip()[:190]
+            return result
+
+        logger.info("Takroriy poll savoli chiqdi, qayta urinish (%s/%s)", attempt, MAX_GENERATION_ATTEMPTS)
+
+    logger.warning("Takrorlanmas poll savoli topilmadi, oxirgi generatsiya ishlatiladi")
+    result = {"question": question, "options": options}
+    if poll_type == "quiz":
+        result["correct_index"] = int(data["correct_index"])
+        result["explanation"] = str(data.get("explanation", "")).strip()[:190]
+    return result
+
+
+# ----------------------------------------------------------------------------
 # Monitoring: adminga xabar va tashqi healthcheck ping
 # ----------------------------------------------------------------------------
 
@@ -452,6 +541,58 @@ async def send_flex_countdown_post() -> None:
         ping_healthcheck(success=False)
 
 
+async def send_poll_post() -> None:
+    poll_type = random.choice(["quiz", "regular"])
+    logger.info("Yangi poll tayyorlanmoqda. Turi: %s", poll_type)
+    bot = Bot(token=BOT_TOKEN)
+
+    try:
+        data = generate_poll_content(poll_type)
+    except Exception as e:
+        logger.error("Poll generatsiya qilishda xatolik: %s", e)
+        await notify_admin(bot, f"❌ Poll generatsiya qilishda xatolik: {e}")
+        ping_healthcheck(success=False)
+        return
+
+    try:
+        if poll_type == "quiz":
+            await bot.send_poll(
+                chat_id=CHANNEL_ID,
+                question=data["question"],
+                options=data["options"],
+                type=PollType.QUIZ,
+                correct_option_id=data["correct_index"],
+                explanation=data.get("explanation") or None,
+                is_anonymous=True,
+            )
+        else:
+            await bot.send_poll(
+                chat_id=CHANNEL_ID,
+                question=data["question"],
+                options=data["options"],
+                type=PollType.REGULAR,
+                is_anonymous=True,
+            )
+        save_recent(RECENT_POLLS_FILE, data["question"])
+        logger.info("Poll muvaffaqiyatli yuborildi: %s", CHANNEL_ID)
+
+        options_preview = "\n".join(f"- {opt}" for opt in data["options"])
+        await notify_admin(
+            bot,
+            f"✅ Poll yuborildi ({poll_type}, {datetime.now():%Y-%m-%d %H:%M})\n\n"
+            f"{data['question']}\n{options_preview}",
+        )
+        ping_healthcheck(success=True)
+    except TelegramError as e:
+        logger.error("Telegramga poll yuborishda xatolik: %s", e)
+        await notify_admin(bot, f"❌ Telegramga poll yuborishda xatolik: {e}")
+        ping_healthcheck(success=False)
+    except Exception as e:
+        logger.error("Kutilmagan xatolik poll yuborishda: %s", e)
+        await notify_admin(bot, f"❌ Kutilmagan xatolik: {e}")
+        ping_healthcheck(success=False)
+
+
 # ----------------------------------------------------------------------------
 # Scheduler
 # ----------------------------------------------------------------------------
@@ -474,6 +615,14 @@ def setup_scheduler() -> AsyncIOScheduler:
         id=f"flex_{flex_hour:02d}{flex_minute:02d}",
     )
     logger.info("Flex post vaqti belgilandi: %02d:%02d (%s)", flex_hour, flex_minute, TIMEZONE)
+
+    poll_hour, poll_minute = POLL_POST_TIME
+    scheduler.add_job(
+        send_poll_post,
+        trigger=CronTrigger(hour=poll_hour, minute=poll_minute, timezone=TIMEZONE),
+        id=f"poll_{poll_hour:02d}{poll_minute:02d}",
+    )
+    logger.info("Poll vaqti belgilandi: %02d:%02d (%s)", poll_hour, poll_minute, TIMEZONE)
     return scheduler
 
 

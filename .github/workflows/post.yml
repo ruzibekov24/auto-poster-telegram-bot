@@ -4,6 +4,8 @@ on:
   schedule:
     # 04:00 UTC = 09:00 Asia/Tashkent (UTC+5, DST yo'q) — fact post
     - cron: "0 4 * * *"
+    # 09:00 UTC = 14:00 Asia/Tashkent — poll/viktorina
+    - cron: "0 9 * * *"
     # 15:00 UTC = 20:00 Asia/Tashkent — flex/countdown post
     - cron: "0 15 * * *"
   workflow_dispatch:
@@ -13,11 +15,12 @@ on:
         type: choice
         options:
           - facts
+          - poll
           - flex
         default: facts
 
 permissions:
-  contents: write   # recent_facts.json / recent_flex.json'ni commit qilib qaytarish uchun
+  contents: write   # recent_*.json'ni commit qilib qaytarish uchun
 
 jobs:
   post:
@@ -36,6 +39,8 @@ jobs:
         run: |
           if [ "${{ github.event.schedule }}" = "0 15 * * *" ]; then
             echo "target=flex" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 9 * * *" ]; then
+            echo "target=poll" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then
             echo "target=facts" >> "$GITHUB_OUTPUT"
           else
@@ -44,11 +49,17 @@ jobs:
 
       - name: Postni yuborish
         run: |
-          if [ "${{ steps.which.outputs.target }}" = "flex" ]; then
-            python -c "import asyncio; from main import send_flex_countdown_post; asyncio.run(send_flex_countdown_post())"
-          else
-            python -c "import asyncio; from main import send_fact_post; asyncio.run(send_fact_post())"
-          fi
+          case "${{ steps.which.outputs.target }}" in
+            flex)
+              python -c "import asyncio; from main import send_flex_countdown_post; asyncio.run(send_flex_countdown_post())"
+              ;;
+            poll)
+              python -c "import asyncio; from main import send_poll_post; asyncio.run(send_poll_post())"
+              ;;
+            *)
+              python -c "import asyncio; from main import send_fact_post; asyncio.run(send_fact_post())"
+              ;;
+          esac
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
@@ -61,6 +72,6 @@ jobs:
         run: |
           git config user.name "facts-bot"
           git config user.email "facts-bot@users.noreply.github.com"
-          git add recent_facts.json recent_flex.json
-          git diff --cached --quiet || git commit -m "chore: update recent facts/flex [skip ci]"
+          git add recent_facts.json recent_flex.json recent_polls.json
+          git diff --cached --quiet || git commit -m "chore: update recent facts/flex/polls [skip ci]"
           git push
