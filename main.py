@@ -64,16 +64,17 @@ LOG_FILE = BASE_DIR / "bot.log"
 MAX_RECENT_FACTS = 20
 MAX_GENERATION_ATTEMPTS = 3
 
-# Aniq muddatlar ma'lum bo'lganda shu ro'yxatga qo'shiladi — masalan:
-# {"university": "Harvard", "round": "Regular Decision", "date": "2027-01-01"}
+# FLEX (Future Leaders Exchange Program) arizasining ANIQ muddati ma'lum bo'lganda
+# shu ro'yxatga qo'shiladi, masalan:
+# {"university": "FLEX", "round": "Ariza topshirish", "date": "2026-09-15"}
 # Ro'yxat bo'sh bo'lsa, bot APPROX_ROUNDS asosida TAXMINIY countdown ko'rsatadi.
 EXACT_DEADLINES: list[dict] = []
 
-# Ko'pchilik top universitetlarda (Harvard, Ivy League va h.k.) har yili taqriban bir xil
-# takrorlanadigan ariza muddatlari — aniq sana e'lon qilinmaguncha TAXMINIY countdown uchun
+# FLEX dasturi arizasi har yili taqriban sentyabr o'rtalarida yopiladi — aniq sana
+# e'lon qilinmaguncha shu taxminiy sana asosida countdown ko'rsatiladi (foydalanuvchi
+# tasdig'i: 10-15 sentyabr oralig'i, o'rtacha 12-sentyabr olindi)
 APPROX_ROUNDS = [
-    {"name": "Early Action / Early Decision", "month": 11, "day": 1},
-    {"name": "Regular Decision", "month": 1, "day": 1},
+    {"name": "FLEX ariza topshirish muddati", "month": 9, "day": 12},
 ]
 
 # Har bir kategoriya uchun mos emoji — kanal mention qatorida ishlatiladi
@@ -272,7 +273,7 @@ def next_deadline() -> tuple[str, int, bool]:
     return name, days_left, False
 
 
-FLEX_HOOKS = ["🎓 Countdown check:", "⏳ Reality check:", "🔥 Flex fact:", "📚 Application szn:"]
+FLEX_HOOKS = ["✈️ FLEX countdown:", "⏳ Reality check:", "🔥 FLEX fact:", "🌎 Exchange szn:"]
 
 
 def build_flex_prompt(avoid: list[str]) -> str:
@@ -285,12 +286,13 @@ def build_flex_prompt(avoid: list[str]) -> str:
         )
 
     return f"""Sen Telegram kanali uchun "flex" mini-fakt post matni yozadigan copywriter'san.
-Kanal auditoriyasi: Harvard va boshqa top universitetlarga (Ivy League va shu kabilar)
-kirishga tayyorlanayotgan Gen-Z talabalar.
+Kanal auditoriyasi: FLEX (Future Leaders Exchange Program — AQSh davlat dasturi, O'zbekiston
+maktab o'quvchilari uchun bir yillik bepul almashinuv dasturi) ga tayyorlanayotgan Gen-Z
+o'quvchilar.
 
-Mavzu: top universitetlarga ariza topshirish jarayoni haqida qisqa, flex/hazil-mutoyibali
-mini fakt — masalan qabul foizi statistikasi, essay maslahati, kutilmagan tarixiy holat,
-yoki motivatsion flex jumla.
+Mavzu: FLEX dasturi haqida qisqa, flex/hazil-mutoyibali mini fakt — masalan dastur imkoniyatlari
+(AQShda bir yil bepul o'qish, host family, stipendiya), qabul statistikasi, ariza/insho
+maslahatlari, test bosqichlari, yoki motivatsion flex jumla.
 
 Ikkita qism yoz (ingliz tilida):
 
@@ -317,7 +319,7 @@ def generate_flex_and_reaction() -> tuple[str, str]:
         raw = response.text.strip()
         fact_part, _, reaction_part = raw.partition(SPLIT_MARKER)
         fact_text = fact_part.strip()
-        reaction_text = reaction_part.strip() or "🎓"
+        reaction_text = reaction_part.strip() or "✈️"
 
         if fact_text not in recent:
             return fact_text, reaction_text
@@ -349,8 +351,8 @@ def build_flex_post_text() -> tuple[str, str]:
         f"{fact_html}\n\n"
         f"{countdown_line}\n\n"
         f"<tg-spoiler>{html.escape(reaction_text)}</tg-spoiler>\n\n"
-        f"#ApplyToHarvard #Countdown\n"
-        f"🎓 {html.escape(CHANNEL_USERNAME)}"
+        f"#FLEX #FutureLeadersExchange\n"
+        f"✈️ {html.escape(CHANNEL_USERNAME)}"
     )
     plain_fact = fact_text.replace("**", "")
     return post_html, plain_fact
