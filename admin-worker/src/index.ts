@@ -18,8 +18,9 @@
  *   /post_leaderboard          — TOP 10'ni kanalga post qilish (admin)
  *
  * Gamifikatsiya: kunlik poll (14:00 Toshkent) endi shu Worker'ning cron trigger'i
- * orqali, ADMIN_BOT_TOKEN bilan va is_anonymous=false qilib yuboriladi — shu sababli
- * poll_answer webhook'lari kelib, D1'da ball hisoblanadi. main.py'dagi eski
+ * orqali yuboriladi. 50% ehtimol bilan — VIKTORINA (inline tugmali xabar, ball
+ * beriladi) yoki oddiy SO'ROVNOMA (native anonim Telegram Poll, ball berilmaydi,
+ * chunki kanal pollari Telegram tomonidan majburiy anonim). main.py'dagi eski
  * send_poll_post() endi GitHub Actions jadvalida ISHLATILMAYDI (faqat zaxira).
  */
 
@@ -30,10 +31,11 @@ interface TelegramUpdate {
     chat: { id: number };
     from?: { id: number };
   };
-  poll_answer?: {
-    poll_id: string;
-    user: { id: number; username?: string; first_name?: string };
-    option_ids: number[];
+  callback_query?: {
+    id: string;
+    data?: string;
+    from: { id: number; username?: string; first_name?: string };
+    message?: { message_id: number; chat: { id: number } };
   };
 }
 
@@ -46,12 +48,11 @@ export interface Env {
   ADMIN_CHAT_ID: string; // faqat shu Telegram user_id admin buyruqlarini ishlata oladi
   WEBHOOK_SECRET: string; // Telegram secret_token tekshiruvi uchun
   GITHUB_TOKEN: string; // /pause, /resume, /stats, /deadline uchun (repo+workflow huquqi)
-  DB: D1Database; // gamifikatsiya: users, polls jadvallari
+  DB: D1Database; // gamifikatsiya: users, quizzes, quiz_answers, settings jadvallari
 }
 
 const POINTS_CORRECT = 10;
 const POINTS_WRONG = 2;
-const POINTS_PARTICIPATION = 3;
 
 // GitHub repo joylashuvi — main.py'ni ishga tushiradigan GitHub Actions shu yerda
 const GITHUB_OWNER = "ruzibekov24";
@@ -385,6 +386,20 @@ async function sendMessage(token: string, chatId: number | string, text: string,
   });
 }
 
+async function sendMessageWithButtons(
+  token: string,
+  chatId: number | string,
+  text: string,
+  buttons: { text: string; callback_data: string }[]
+) {
+  return tgCall(token, "sendMessage", {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: buttons.map((b) => [b]) }, // har bir variant alohida qatorda
+  });
+}
+
 async function sendPoll(
   token: string,
   chatId: number | string,
@@ -407,21 +422,15 @@ async function sendPoll(
 }
 
 // ---------------------------------------------------------------------------
-// Gamifikatsiya (D1): ball, poll kuzatuvi, leaderboard
+// Gamifikatsiya (D1): ball, tugmali viktorina, leaderboard
+//
+// Kanal pollari Telegram tomonidan MAJBURIY anonim qilinadi — shu sabab
+// kim qanday javob berganini bilib bo'lmaydi. Shuning uchun VIKTORINA endi
+// native Poll o'rniga inline tugmali oddiy xabar orqali yuboriladi: tugma
+// bosilganda callback_query keladi (bu kanalda ham to'liq ishlaydi va
+// bosuvchining shaxsi ma'lum bo'ladi), javob esa faqat o'sha odamga popup
+// (show_alert) sifatida ko'rinadi — boshqalar ko'rmaydi.
 // ---------------------------------------------------------------------------
-
-async function recordPoll(env: Env, pollId: string, pollType: "quiz" | "regular", correctOptionId: number | null) {
-  await env.DB.prepare("INSERT INTO polls (poll_id, poll_type, correct_option_id) VALUES (?, ?, ?)")
-    .bind(pollId, pollType, correctOptionId)
-    .run();
-}
-
-async function getPoll(env: Env, pollId: string): Promise<{ poll_type: string; correct_option_id: number | null } | null> {
-  const row = await env.DB.prepare("SELECT poll_type, correct_option_id FROM polls WHERE poll_id = ?")
-    .bind(pollId)
-    .first();
-  return (row as any) ?? null;
-}
 
 async function awardPoints(
   env: Env,
@@ -446,20 +455,54 @@ async function awardPoints(
     .run();
 }
 
-async function handlePollAnswer(env: Env, pollAnswer: NonNullable<TelegramUpdate["poll_answer"]>) {
-  if (pollAnswer.option_ids.length === 0) return; // ovozni bekor qilgan
+async function answerCallbackQuery(env: Env, callbackQueryId: string, text: string, showAlert = false) {
+  await tgCall(env.ADMIN_BOT_TOKEN, "answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text: text.slice(0, 200),
+    show_alert: showAlert,
+  }).catch(() => {});
+}
 
-  const poll = await getPoll(env, pollAnswer.poll_id);
-  if (!poll) return; // preview yoki gamifikatsiyasiz poll — e'tiborsiz qoldiriladi
-
-  let points = POINTS_PARTICIPATION;
-  let wasCorrect: boolean | null = null;
-  if (poll.poll_type === "quiz") {
-    wasCorrect = pollAnswer.option_ids.includes(poll.correct_option_id ?? -1);
-    points = wasCorrect ? POINTS_CORRECT : POINTS_WRONG;
+async function handleCallbackQuery(env: Env, cq: NonNullable<TelegramUpdate["callback_query"]>) {
+  if (!cq.data?.startsWith("qz:") || !cq.message) {
+    await answerCallbackQuery(env, cq.id, "");
+    return;
   }
 
-  await awardPoints(env, pollAnswer.user.id, pollAnswer.user.username, pollAnswer.user.first_name, points, wasCorrect);
+  const chosenIndex = Number.parseInt(cq.data.slice(3), 10);
+  const quizKey = `${cq.message.chat.id}:${cq.message.message_id}`;
+
+  const quiz = await env.DB.prepare("SELECT correct_index FROM quizzes WHERE quiz_key = ?")
+    .bind(quizKey)
+    .first<{ correct_index: number }>();
+  if (!quiz) {
+    await answerCallbackQuery(env, cq.id, "Bu viktorina topilmadi (eskirgan bo'lishi mumkin).");
+    return;
+  }
+
+  const existing = await env.DB.prepare("SELECT is_correct FROM quiz_answers WHERE quiz_key = ? AND user_id = ?")
+    .bind(quizKey, cq.from.id)
+    .first<{ is_correct: number }>();
+  if (existing) {
+    await answerCallbackQuery(
+      env,
+      cq.id,
+      existing.is_correct ? "Siz allaqachon to'g'ri javob bergansiz ✅" : "Siz allaqachon javob bergansiz ❌",
+      true
+    );
+    return;
+  }
+
+  const isCorrect = chosenIndex === quiz.correct_index;
+  await env.DB.prepare("INSERT INTO quiz_answers (quiz_key, user_id, chosen_index, is_correct) VALUES (?, ?, ?, ?)")
+    .bind(quizKey, cq.from.id, chosenIndex, isCorrect ? 1 : 0)
+    .run();
+
+  const points = isCorrect ? POINTS_CORRECT : POINTS_WRONG;
+  await awardPoints(env, cq.from.id, cq.from.username, cq.from.first_name, points, isCorrect);
+
+  const alertText = isCorrect ? `✅ To'g'ri! +${POINTS_CORRECT} ball` : `❌ Noto'g'ri javob. +${POINTS_WRONG} ball`;
+  await answerCallbackQuery(env, cq.id, alertText, true);
 }
 
 async function getUserStats(env: Env, userId: number) {
@@ -477,12 +520,40 @@ async function getLeaderboard(env: Env, limit = 10) {
   return results;
 }
 
-async function postGamifiedPoll(env: Env): Promise<{ pollType: "quiz" | "regular"; question: string }> {
+function buildQuizMessageHtml(poll: PollData): string {
+  const letters = ["A", "B", "C", "D", "E", "F"];
+  const optionsHtml = poll.options
+    .map((opt, i) => `${letters[i] ?? i + 1}) ${escapeHtml(opt)}`)
+    .join("\n");
+  return `🧠 <b>Viktorina!</b>\n\n${escapeHtml(poll.question)}\n\n${optionsHtml}\n\nJavobni pastdagi tugmalardan tanlang 👇`;
+}
+
+async function postGamifiedQuiz(env: Env): Promise<void> {
+  const poll = await generatePoll(env, "quiz");
+  const text = buildQuizMessageHtml(poll);
+  const letters = ["A", "B", "C", "D", "E", "F"];
+  const buttons = poll.options.map((opt, i) => ({
+    text: `${letters[i] ?? i + 1}) ${opt}`.slice(0, 64),
+    callback_data: `qz:${i}`,
+  }));
+  const message = await sendMessageWithButtons(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, text, buttons);
+  const quizKey = `${message.chat.id}:${message.message_id}`;
+  await env.DB.prepare("INSERT INTO quizzes (quiz_key, correct_index, options) VALUES (?, ?, ?)")
+    .bind(quizKey, poll.correct_index, JSON.stringify(poll.options))
+    .run();
+}
+
+async function postDailyPollOrQuiz(env: Env): Promise<{ pollType: "quiz" | "regular" }> {
   const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
-  const poll = await generatePoll(env, pollType);
-  const message = await sendPoll(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, poll, pollType, false);
-  await recordPoll(env, message.poll.id, pollType, pollType === "quiz" ? poll.correct_index ?? null : null);
-  return { pollType, question: poll.question };
+  if (pollType === "quiz") {
+    await postGamifiedQuiz(env);
+  } else {
+    // Oddiy so'rovnoma — ball berilmaydi (to'g'ri/noto'g'ri yo'q), shunchaki
+    // native (majburiy anonim) Telegram Poll sifatida, sof engagement uchun.
+    const poll = await generatePoll(env, "regular");
+    await sendPoll(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, poll, "regular", true);
+  }
+  return { pollType };
 }
 
 async function getSetting(env: Env, key: string): Promise<string | null> {
@@ -531,7 +602,7 @@ async function handlePostNowCommand(env: Env, chatId: number, fromId: number, ar
       const html = await buildFlexHtml(env);
       await sendMessage(env.BOT_TOKEN, env.CHANNEL_ID, html, true);
     } else {
-      await postGamifiedPoll(env); // ball hisoblanishi uchun ADMIN_BOT_TOKEN + is_anonymous=false
+      await postDailyPollOrQuiz(env);
     }
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `✅ Kanalga "${target}" post yuborildi.`);
   } catch (e) {
@@ -771,8 +842,8 @@ export default {
       return new Response("Bad Request", { status: 400 });
     }
 
-    if (update.poll_answer) {
-      await handlePollAnswer(env, update.poll_answer).catch(() => {});
+    if (update.callback_query) {
+      await handleCallbackQuery(env, update.callback_query).catch(() => {});
       return new Response("OK");
     }
 
@@ -822,6 +893,6 @@ export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const paused = await getSetting(env, "paused");
     if (paused === "true") return;
-    await postGamifiedPoll(env);
+    await postDailyPollOrQuiz(env);
   },
 };
