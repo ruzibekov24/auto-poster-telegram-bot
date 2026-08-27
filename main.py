@@ -42,6 +42,10 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", CHANNEL_ID or "@MyHarvardPath")
 
+# Ball/leaderboard/interaktiv buyruqlarni boshqaradigan admin bot — postlar tagida
+# ko'rsatiladi, shunda odamlar botga qanday kirishni bilib oladi
+ADMIN_BOT_USERNAME = os.getenv("ADMIN_BOT_USERNAME", "@MHP_adminbot")
+
 # Ixtiyoriy: har bir post natijasi (muvaffaqiyat/xato) haqida shaxsiy xabar olish uchun
 # o'z Telegram chat ID'ingizni kiriting (@userinfobot orqali bilib olish mumkin)
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
@@ -258,7 +262,8 @@ def build_post_text(category: str) -> tuple[str, str]:
         f"{fact_html}\n\n"
         f"<tg-spoiler>{html.escape(reaction_text)}</tg-spoiler>\n\n"
         f"#Facts\n"
-        f"{emoji} {html.escape(CHANNEL_USERNAME)}"
+        f"{emoji} {html.escape(CHANNEL_USERNAME)}\n\n"
+        f"🤖 Ball to'plash, reyting va ko'proq fakt uchun: {html.escape(ADMIN_BOT_USERNAME)}"
     )
     # recent_facts.json'ga **belgilarisiz** toza matnni saqlaymiz
     plain_fact = fact_text.replace("**", "")
@@ -380,7 +385,8 @@ def build_flex_post_text() -> tuple[str, str]:
         f"{countdown_line}\n\n"
         f"<tg-spoiler>{html.escape(reaction_text)}</tg-spoiler>\n\n"
         f"#FLEX #FutureLeadersExchange\n"
-        f"✈️ {html.escape(CHANNEL_USERNAME)}"
+        f"✈️ {html.escape(CHANNEL_USERNAME)}\n\n"
+        f"🤖 Ball to'plash, reyting va ko'proq ma'lumot uchun: {html.escape(ADMIN_BOT_USERNAME)}"
     )
     plain_fact = fact_text.replace("**", "")
     return post_html, plain_fact

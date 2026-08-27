@@ -59,6 +59,9 @@ const GITHUB_OWNER = "ruzibekov24";
 const GITHUB_REPO = "auto-poster-telegram-bot";
 const WORKFLOW_FILE = "post.yml";
 
+// main.py'dagi ADMIN_BOT_USERNAME bilan qo'lda sinxronlab turing
+const ADMIN_BOT_USERNAME = "@MHP_adminbot";
+
 // post.yml'dagi cron jadvali bilan qo'lda sinxronlab turing (UTC soatlari)
 const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
   { hourUtc: 4, type: "facts", label: "🧠 Fact post" },
@@ -325,6 +328,8 @@ async function buildFlexHtml(env: Env): Promise<string> {
     "",
     "#FLEX #FutureLeadersExchange",
     `✈️ @${env.CHANNEL_USERNAME.replace(/^@/, "")}`,
+    "",
+    `🤖 Ball to'plash, reyting va ko'proq ma'lumot uchun: ${ADMIN_BOT_USERNAME}`,
   ].join("\n");
 }
 
@@ -538,7 +543,7 @@ function buildQuizMessageHtml(poll: PollData): string {
   const optionsHtml = poll.options
     .map((opt, i) => `${letters[i] ?? i + 1}) ${escapeHtml(opt)}`)
     .join("\n");
-  return `🧠 <b>Viktorina!</b>\n\n${escapeHtml(poll.question)}\n\n${optionsHtml}\n\nJavobni pastdagi tugmalardan tanlang 👇`;
+  return `🧠 <b>Viktorina!</b>\n\n${escapeHtml(poll.question)}\n\n${optionsHtml}\n\nJavobni pastdagi tugmalardan tanlang 👇\n\n🤖 Ball va reyting: ${ADMIN_BOT_USERNAME}`;
 }
 
 async function postGamifiedQuiz(env: Env): Promise<void> {
@@ -635,6 +640,8 @@ function buildFactHtmlForChannel(env: Env, category: string, fact: string, react
     "",
     "#Facts",
     `${emoji} @${env.CHANNEL_USERNAME.replace(/^@/, "")}`,
+    "",
+    `🤖 Ball to'plash, reyting va ko'proq fakt uchun: ${ADMIN_BOT_USERNAME}`,
   ].join("\n");
 }
 
@@ -648,14 +655,12 @@ async function requireAdmin(env: Env, chatId: number, fromId: number): Promise<b
   return false;
 }
 
-const HELP_TEXT = `👋 Mavjud buyruqlar:
+const PUBLIC_COMMANDS_TEXT = `/fact — hoziroq qiziqarli fakt oling
+/mypoints — ballaringizni ko'ring
+/leaderboard — TOP 10 faol o'quvchilarni ko'ring
+/help — shu ro'yxatni qayta ko'rish`;
 
-/fact — hoziroq shaxsiy fakt
-/mypoints — sizning ballaringiz
-/leaderboard — TOP 10 faol o'quvchilar
-
-Quyidagilar faqat admin uchun:
-/post_now facts|poll|flex — kanalga hoziroq post yuborish
+const ADMIN_COMMANDS_TEXT = `/post_now facts|poll|flex — kanalga hoziroq post yuborish
 /preview facts|poll|flex — kanalga yubormasdan, sizga preview
 /post_leaderboard — TOP 10'ni kanalga post qilish
 /deadline YYYY-MM-DD — FLEX aniq muddatini o'rnatish
@@ -664,6 +669,23 @@ Quyidagilar faqat admin uchun:
 /resume — kunlik avtomatik postlarni qayta yoqish
 /stats — oxirgi postlar holati
 /next — keyingi avtomatik post qachon ketishi`;
+
+const WELCOME_TEXT = `👋 <b>Salom! Xush kelibsiz!</b>
+
+Bu — <b>Going to Harvard | Garvard sari</b> kanalining rasmiy yordamchi boti.
+
+Bu yerda siz:
+🧠 Qiziqarli faktlarni hoziroq olishingiz
+🏆 Kanaldagi viktorinalarga javob berib ball to'plashingiz
+📊 Boshqa o'quvchilar bilan reytingda raqobatlashishingiz mumkin!
+
+<b>Buyruqlar:</b>
+${PUBLIC_COMMANDS_TEXT}`;
+
+function buildHelpText(userIsAdmin: boolean): string {
+  const base = `<b>Buyruqlar:</b>\n${PUBLIC_COMMANDS_TEXT}`;
+  return userIsAdmin ? `${base}\n\n<b>Admin uchun:</b>\n${ADMIN_COMMANDS_TEXT}` : base;
+}
 
 async function handlePreviewCommand(env: Env, chatId: number, fromId: number, args: string[]) {
   if (!(await requireAdmin(env, chatId, fromId))) return;
@@ -892,8 +914,10 @@ export default {
         await handleLeaderboardCommand(env, chatId);
       } else if (text === "/post_leaderboard") {
         await handlePostLeaderboardCommand(env, chatId, fromId);
-      } else if (text === "/start" || text === "/help") {
-        await sendMessage(env.ADMIN_BOT_TOKEN, chatId, HELP_TEXT);
+      } else if (text === "/start") {
+        await sendMessage(env.ADMIN_BOT_TOKEN, chatId, WELCOME_TEXT, true);
+      } else if (text === "/help") {
+        await sendMessage(env.ADMIN_BOT_TOKEN, chatId, buildHelpText(isAdmin(env, fromId)), true);
       }
     } catch (e) {
       // Xatolikni foydalanuvchiga ko'rsatamiz, lekin Worker'ni yiqitmaymiz
