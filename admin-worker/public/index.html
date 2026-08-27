@@ -43,15 +43,19 @@
   }
 
   .badge {
-    width: 56px;
-    height: 56px;
+    width: 72px;
+    height: 72px;
     margin: 0 auto 10px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, var(--button), color-mix(in srgb, var(--button) 60%, #7b2ff7));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  }
+
+  .badge img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .header h1 {
@@ -310,7 +314,7 @@
 <body>
 
 <div class="header">
-  <div class="badge" id="icon-cap"></div>
+  <div class="badge"><img src="/logo.jpg" alt="Harvard" /></div>
   <h1>Harvard Path</h1>
   <p>Going to Harvard | Garvard sari</p>
 </div>
@@ -389,7 +393,6 @@
     xCircle: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>',
   };
 
-  document.getElementById('icon-cap').innerHTML = ICONS.cap;
   document.getElementById('icon-user').innerHTML = ICONS.user;
   document.getElementById('icon-trophy').innerHTML = ICONS.trophy;
   document.getElementById('icon-history').innerHTML = ICONS.history;
