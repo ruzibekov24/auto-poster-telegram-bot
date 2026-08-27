@@ -633,13 +633,11 @@ def setup_scheduler() -> AsyncIOScheduler:
     )
     logger.info("Flex post vaqti belgilandi: %02d:%02d (%s)", flex_hour, flex_minute, TIMEZONE)
 
-    poll_hour, poll_minute = POLL_POST_TIME
-    scheduler.add_job(
-        send_poll_post,
-        trigger=CronTrigger(hour=poll_hour, minute=poll_minute, timezone=TIMEZONE),
-        id=f"poll_{poll_hour:02d}{poll_minute:02d}",
-    )
-    logger.info("Poll vaqti belgilandi: %02d:%02d (%s)", poll_hour, poll_minute, TIMEZONE)
+    # ESLATMA: poll/viktorina endi bu yerda REJALASHTIRILMAYDI — u Cloudflare
+    # Worker'ning o'z cron trigger'i orqali (admin-worker/src/index.ts) ADMIN_BOT_TOKEN
+    # bilan yuboriladi, chunki gamifikatsiya (ball tizimi) uchun poll_answer webhook
+    # kerak. send_poll_post() funksiyasi shu faylda zaxira sifatida qoladi, lekin
+    # avtomatik chaqirilmaydi (ikki marta poll ketib qolmasligi uchun).
     return scheduler
 
 

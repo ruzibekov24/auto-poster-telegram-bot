@@ -13,6 +13,14 @@
  *   /pause / /resume           — kunlik avtomatik postlarni to'xtatish/yoqish (admin)
  *   /stats                     — oxirgi postlar holati + pauza holati (admin)
  *   /next                      — keyingi avtomatik post qachon ketishi (admin)
+ *   /mypoints                  — o'z ballaringiz (hammaga ochiq)
+ *   /leaderboard                — TOP 10 (hammaga ochiq)
+ *   /post_leaderboard          — TOP 10'ni kanalga post qilish (admin)
+ *
+ * Gamifikatsiya: kunlik poll (14:00 Toshkent) endi shu Worker'ning cron trigger'i
+ * orqali, ADMIN_BOT_TOKEN bilan va is_anonymous=false qilib yuboriladi — shu sababli
+ * poll_answer webhook'lari kelib, D1'da ball hisoblanadi. main.py'dagi eski
+ * send_poll_post() endi GitHub Actions jadvalida ISHLATILMAYDI (faqat zaxira).
  */
 
 interface TelegramUpdate {
@@ -21,6 +29,11 @@ interface TelegramUpdate {
     text?: string;
     chat: { id: number };
     from?: { id: number };
+  };
+  poll_answer?: {
+    poll_id: string;
+    user: { id: number; username?: string; first_name?: string };
+    option_ids: number[];
   };
 }
 
@@ -33,7 +46,12 @@ export interface Env {
   ADMIN_CHAT_ID: string; // faqat shu Telegram user_id admin buyruqlarini ishlata oladi
   WEBHOOK_SECRET: string; // Telegram secret_token tekshiruvi uchun
   GITHUB_TOKEN: string; // /pause, /resume, /stats, /deadline uchun (repo+workflow huquqi)
+  DB: D1Database; // gamifikatsiya: users, polls jadvallari
 }
+
+const POINTS_CORRECT = 10;
+const POINTS_WRONG = 2;
+const POINTS_PARTICIPATION = 3;
 
 // GitHub repo joylashuvi — main.py'ni ishga tushiradigan GitHub Actions shu yerda
 const GITHUB_OWNER = "ruzibekov24";
@@ -367,19 +385,117 @@ async function sendMessage(token: string, chatId: number | string, text: string,
   });
 }
 
-async function sendPoll(token: string, chatId: number | string, poll: PollData, pollType: "quiz" | "regular") {
+async function sendPoll(
+  token: string,
+  chatId: number | string,
+  poll: PollData,
+  pollType: "quiz" | "regular",
+  anonymous = true
+) {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     question: poll.question,
     options: poll.options,
-    is_anonymous: true,
+    is_anonymous: anonymous,
     type: pollType,
   };
   if (pollType === "quiz") {
     payload.correct_option_id = poll.correct_index;
     if (poll.explanation) payload.explanation = poll.explanation;
   }
-  return tgCall(token, "sendPoll", payload);
+  return tgCall(token, "sendPoll", payload); // natija: Message obyekti, .poll.id bilan
+}
+
+// ---------------------------------------------------------------------------
+// Gamifikatsiya (D1): ball, poll kuzatuvi, leaderboard
+// ---------------------------------------------------------------------------
+
+async function recordPoll(env: Env, pollId: string, pollType: "quiz" | "regular", correctOptionId: number | null) {
+  await env.DB.prepare("INSERT INTO polls (poll_id, poll_type, correct_option_id) VALUES (?, ?, ?)")
+    .bind(pollId, pollType, correctOptionId)
+    .run();
+}
+
+async function getPoll(env: Env, pollId: string): Promise<{ poll_type: string; correct_option_id: number | null } | null> {
+  const row = await env.DB.prepare("SELECT poll_type, correct_option_id FROM polls WHERE poll_id = ?")
+    .bind(pollId)
+    .first();
+  return (row as any) ?? null;
+}
+
+async function awardPoints(
+  env: Env,
+  userId: number,
+  username: string | undefined,
+  firstName: string | undefined,
+  points: number,
+  wasCorrect: boolean | null
+) {
+  await env.DB.prepare(
+    `INSERT INTO users (user_id, username, first_name, points, correct_answers, total_answers, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
+     ON CONFLICT(user_id) DO UPDATE SET
+       username = excluded.username,
+       first_name = excluded.first_name,
+       points = points + excluded.points,
+       correct_answers = correct_answers + excluded.correct_answers,
+       total_answers = total_answers + 1,
+       updated_at = datetime('now')`
+  )
+    .bind(userId, username ?? null, firstName ?? null, points, wasCorrect ? 1 : 0)
+    .run();
+}
+
+async function handlePollAnswer(env: Env, pollAnswer: NonNullable<TelegramUpdate["poll_answer"]>) {
+  if (pollAnswer.option_ids.length === 0) return; // ovozni bekor qilgan
+
+  const poll = await getPoll(env, pollAnswer.poll_id);
+  if (!poll) return; // preview yoki gamifikatsiyasiz poll — e'tiborsiz qoldiriladi
+
+  let points = POINTS_PARTICIPATION;
+  let wasCorrect: boolean | null = null;
+  if (poll.poll_type === "quiz") {
+    wasCorrect = pollAnswer.option_ids.includes(poll.correct_option_id ?? -1);
+    points = wasCorrect ? POINTS_CORRECT : POINTS_WRONG;
+  }
+
+  await awardPoints(env, pollAnswer.user.id, pollAnswer.user.username, pollAnswer.user.first_name, points, wasCorrect);
+}
+
+async function getUserStats(env: Env, userId: number) {
+  return env.DB.prepare("SELECT points, correct_answers, total_answers FROM users WHERE user_id = ?")
+    .bind(userId)
+    .first<{ points: number; correct_answers: number; total_answers: number }>();
+}
+
+async function getLeaderboard(env: Env, limit = 10) {
+  const { results } = await env.DB.prepare(
+    "SELECT user_id, username, first_name, points, correct_answers, total_answers FROM users ORDER BY points DESC LIMIT ?"
+  )
+    .bind(limit)
+    .all<{ user_id: number; username: string | null; first_name: string | null; points: number }>();
+  return results;
+}
+
+async function postGamifiedPoll(env: Env): Promise<{ pollType: "quiz" | "regular"; question: string }> {
+  const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
+  const poll = await generatePoll(env, pollType);
+  const message = await sendPoll(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, poll, pollType, false);
+  await recordPoll(env, message.poll.id, pollType, pollType === "quiz" ? poll.correct_index ?? null : null);
+  return { pollType, question: poll.question };
+}
+
+async function getSetting(env: Env, key: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+async function setSetting(env: Env, key: string, value: string): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  )
+    .bind(key, value)
+    .run();
 }
 
 // ---------------------------------------------------------------------------
@@ -415,9 +531,7 @@ async function handlePostNowCommand(env: Env, chatId: number, fromId: number, ar
       const html = await buildFlexHtml(env);
       await sendMessage(env.BOT_TOKEN, env.CHANNEL_ID, html, true);
     } else {
-      const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
-      const poll = await generatePoll(env, pollType);
-      await sendPoll(env.BOT_TOKEN, env.CHANNEL_ID, poll, pollType);
+      await postGamifiedPoll(env); // ball hisoblanishi uchun ADMIN_BOT_TOKEN + is_anonymous=false
     }
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `✅ Kanalga "${target}" post yuborildi.`);
   } catch (e) {
@@ -452,11 +566,14 @@ async function requireAdmin(env: Env, chatId: number, fromId: number): Promise<b
 
 const HELP_TEXT = `👋 Mavjud buyruqlar:
 
-/fact — hoziroq shaxsiy fakt (hammaga ochiq)
+/fact — hoziroq shaxsiy fakt
+/mypoints — sizning ballaringiz
+/leaderboard — TOP 10 faol o'quvchilar
 
 Quyidagilar faqat admin uchun:
 /post_now facts|poll|flex — kanalga hoziroq post yuborish
 /preview facts|poll|flex — kanalga yubormasdan, sizga preview
+/post_leaderboard — TOP 10'ni kanalga post qilish
 /deadline YYYY-MM-DD — FLEX aniq muddatini o'rnatish
 /deadline clear — aniq muddatni bekor qilish (taxminiyga qaytarish)
 /pause — kunlik avtomatik postlarni to'xtatish
@@ -523,11 +640,12 @@ async function handleDeadlineCommand(env: Env, chatId: number, fromId: number, a
 async function handlePauseCommand(env: Env, chatId: number, fromId: number, enable: boolean) {
   if (!(await requireAdmin(env, chatId, fromId))) return;
   try {
-    await setWorkflowEnabled(env, enable);
+    await setWorkflowEnabled(env, enable); // GitHub Actions: facts + flex
+    await setSetting(env, "paused", enable ? "false" : "true"); // Worker cron: poll
     await sendMessage(
       env.ADMIN_BOT_TOKEN,
       chatId,
-      enable ? "▶️ Kunlik avtomatik postlar qayta yoqildi." : "⏸ Kunlik avtomatik postlar to'xtatildi."
+      enable ? "▶️ Kunlik avtomatik postlar (fact/poll/flex) qayta yoqildi." : "⏸ Kunlik avtomatik postlar (fact/poll/flex) to'xtatildi."
     );
   } catch (e) {
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
@@ -584,6 +702,52 @@ async function handleNextCommand(env: Env, chatId: number, fromId: number) {
   }
 }
 
+function formatLeaderboard(rows: { username: string | null; first_name: string | null; points: number }[]): string {
+  const medals = ["🥇", "🥈", "🥉"];
+  return rows
+    .map((u, i) => {
+      const name = u.username ? `@${u.username}` : u.first_name || "Foydalanuvchi";
+      const rank = medals[i] ?? `${i + 1}.`;
+      return `${rank} ${name} — ${u.points} ball`;
+    })
+    .join("\n");
+}
+
+async function handleMyPointsCommand(env: Env, chatId: number, userId: number) {
+  const stats = await getUserStats(env, userId);
+  if (!stats) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Hali ballaringiz yo'q — kanaldagi viktorina/pollarga javob bering! 🎯");
+    return;
+  }
+  const accuracy = stats.total_answers > 0 ? Math.round((stats.correct_answers / stats.total_answers) * 100) : 0;
+  await sendMessage(
+    env.ADMIN_BOT_TOKEN,
+    chatId,
+    `🏆 Sizning ballaringiz: ${stats.points}\n✅ To'g'ri javoblar: ${stats.correct_answers}/${stats.total_answers} (${accuracy}%)`
+  );
+}
+
+async function handleLeaderboardCommand(env: Env, chatId: number) {
+  const top = await getLeaderboard(env, 10);
+  if (!top.length) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Hali hech kim ball to'plamagan. Birinchi bo'ling! 🚀");
+    return;
+  }
+  await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `🏆 TOP ${top.length}:\n\n${formatLeaderboard(top)}`);
+}
+
+async function handlePostLeaderboardCommand(env: Env, chatId: number, fromId: number) {
+  if (!(await requireAdmin(env, chatId, fromId))) return;
+  const top = await getLeaderboard(env, 10);
+  if (!top.length) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Hali hech kim ball to'plamagan.");
+    return;
+  }
+  const text = `🏆 TOP ${top.length} faol o'quvchi:\n\n${formatLeaderboard(top)}\n\n#Leaderboard`;
+  await sendMessage(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, text);
+  await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "✅ Leaderboard kanalga yuborildi.");
+}
+
 // ---------------------------------------------------------------------------
 // Worker entrypoint
 // ---------------------------------------------------------------------------
@@ -605,6 +769,11 @@ export default {
       update = await request.json();
     } catch {
       return new Response("Bad Request", { status: 400 });
+    }
+
+    if (update.poll_answer) {
+      await handlePollAnswer(env, update.poll_answer).catch(() => {});
+      return new Response("OK");
     }
 
     const message = update.message;
@@ -633,6 +802,12 @@ export default {
         await handleStatsCommand(env, chatId, fromId);
       } else if (text === "/next") {
         await handleNextCommand(env, chatId, fromId);
+      } else if (text === "/mypoints") {
+        await handleMyPointsCommand(env, chatId, fromId);
+      } else if (text === "/leaderboard") {
+        await handleLeaderboardCommand(env, chatId);
+      } else if (text === "/post_leaderboard") {
+        await handlePostLeaderboardCommand(env, chatId, fromId);
       } else if (text === "/start" || text === "/help") {
         await sendMessage(env.ADMIN_BOT_TOKEN, chatId, HELP_TEXT);
       }
@@ -642,5 +817,11 @@ export default {
     }
 
     return new Response("OK");
+  },
+
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    const paused = await getSetting(env, "paused");
+    if (paused === "true") return;
+    await postGamifiedPoll(env);
   },
 };

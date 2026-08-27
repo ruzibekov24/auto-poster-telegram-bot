@@ -5,5 +5,16 @@
   "compatibility_date": "2026-08-26",
   "observability": {
     "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "harvard-path-bot",
+      "database_id": "fa205d04-2480-4d1f-a593-a32f001790d1",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 9 * * *"]
   }
 }
