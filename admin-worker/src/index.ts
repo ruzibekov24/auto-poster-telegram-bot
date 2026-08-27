@@ -513,11 +513,13 @@ async function handleCallbackQuery(env: Env, cq: NonNullable<TelegramUpdate["cal
   }
 
   const isCorrect = chosenIndex === quiz.correct_index;
-  await env.DB.prepare("INSERT INTO quiz_answers (quiz_key, user_id, chosen_index, is_correct) VALUES (?, ?, ?, ?)")
-    .bind(quizKey, cq.from.id, chosenIndex, isCorrect ? 1 : 0)
+  const points = isCorrect ? POINTS_CORRECT : POINTS_WRONG;
+  await env.DB.prepare(
+    "INSERT INTO quiz_answers (quiz_key, user_id, chosen_index, is_correct, points) VALUES (?, ?, ?, ?, ?)"
+  )
+    .bind(quizKey, cq.from.id, chosenIndex, isCorrect ? 1 : 0, points)
     .run();
 
-  const points = isCorrect ? POINTS_CORRECT : POINTS_WRONG;
   await awardPoints(env, cq.from.id, cq.from.username, cq.from.first_name, points, isCorrect);
 
   const alertText = isCorrect ? `✅ To'g'ri! +${POINTS_CORRECT} ball` : `❌ Noto'g'ri javob. +${POINTS_WRONG} ball`;
@@ -620,6 +622,52 @@ async function handleApiLeaderboard(request: Request, env: Env): Promise<Respons
   return jsonResponse({ leaderboard });
 }
 
+async function getUserHistory(env: Env, userId: number, limit = 15) {
+  const { results } = await env.DB.prepare(
+    `SELECT qz.question, qz.options, qz.correct_index, qa.chosen_index, qa.is_correct, qa.points, qa.answered_at
+     FROM quiz_answers qa
+     JOIN quizzes qz ON qz.quiz_key = qa.quiz_key
+     WHERE qa.user_id = ?
+     ORDER BY qa.answered_at DESC
+     LIMIT ?`
+  )
+    .bind(userId, limit)
+    .all<{
+      question: string;
+      options: string;
+      correct_index: number;
+      chosen_index: number;
+      is_correct: number;
+      points: number;
+      answered_at: string;
+    }>();
+  return results.map((r) => {
+    const options: string[] = JSON.parse(r.options);
+    return {
+      question: r.question,
+      chosen: options[r.chosen_index] ?? "",
+      correct: options[r.correct_index] ?? "",
+      is_correct: !!r.is_correct,
+      points: r.points,
+      answered_at: r.answered_at,
+    };
+  });
+}
+
+async function handleApiHistory(request: Request, env: Env): Promise<Response> {
+  const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
+  const user = await verifyInitData(initData, env.ADMIN_BOT_TOKEN);
+  if (!user) return jsonResponse({ error: "Avtorizatsiya xato — botni Telegram ichida oching." }, 401);
+
+  const history = await getUserHistory(env, user.id);
+  return jsonResponse({ history });
+}
+
+async function handleApiDeadline(_request: Request, env: Env): Promise<Response> {
+  const deadline = await computeDeadline(env);
+  return jsonResponse(deadline);
+}
+
 function buildQuizMessageHtml(poll: PollData): string {
   const letters = ["A", "B", "C", "D", "E", "F"];
   const optionsHtml = poll.options
@@ -638,8 +686,8 @@ async function postGamifiedQuiz(env: Env): Promise<void> {
   }));
   const message = await sendMessageWithButtons(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, text, buttons);
   const quizKey = `${message.chat.id}:${message.message_id}`;
-  await env.DB.prepare("INSERT INTO quizzes (quiz_key, correct_index, options) VALUES (?, ?, ?)")
-    .bind(quizKey, poll.correct_index, JSON.stringify(poll.options))
+  await env.DB.prepare("INSERT INTO quizzes (quiz_key, correct_index, options, question) VALUES (?, ?, ?, ?)")
+    .bind(quizKey, poll.correct_index, JSON.stringify(poll.options), poll.question)
     .run();
 }
 
@@ -947,6 +995,8 @@ export default {
     // Mini App JSON API
     if (url.pathname === "/api/me") return handleApiMe(request, env);
     if (url.pathname === "/api/leaderboard") return handleApiLeaderboard(request, env);
+    if (url.pathname === "/api/history") return handleApiHistory(request, env);
+    if (url.pathname === "/api/deadline") return handleApiDeadline(request, env);
 
     // Mini App statik fayllari (public/index.html va h.k.)
     if (request.method === "GET") {

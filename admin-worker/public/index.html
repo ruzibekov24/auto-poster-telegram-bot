@@ -13,32 +13,51 @@
     --link: #2481cc;
     --button: #2481cc;
     --button-text: #ffffff;
-    --secondary-bg: #f0f0f0;
+    --secondary-bg: #f4f4f5;
+    --gold: #d4a017;
+    --silver: #9aa0a6;
+    --bronze: #b06a3a;
+    --good: #2fa84f;
+    --bad: #e0533d;
   }
 
   * { box-sizing: border-box; }
 
-  body {
+  html, body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: var(--text);
     padding: 16px;
-    padding-bottom: 32px;
+    padding-bottom: 40px;
   }
+
+  svg { display: block; }
 
   .header {
     text-align: center;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
   }
 
-  .header .emoji {
-    font-size: 40px;
+  .badge {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 10px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--button), color-mix(in srgb, var(--button) 60%, #7b2ff7));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
   }
 
   .header h1 {
-    font-size: 20px;
-    margin: 8px 0 2px;
+    font-size: 19px;
+    margin: 0 0 2px;
+    font-weight: 700;
   }
 
   .header p {
@@ -49,24 +68,31 @@
 
   .tabs {
     display: flex;
-    gap: 8px;
+    gap: 4px;
     margin-bottom: 16px;
     background: var(--secondary-bg);
-    border-radius: 12px;
+    border-radius: 14px;
     padding: 4px;
   }
 
   .tab {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
     text-align: center;
-    padding: 10px;
-    border-radius: 10px;
-    font-size: 14px;
+    padding: 8px 4px;
+    border-radius: 11px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     color: var(--hint);
     user-select: none;
+    transition: background 0.15s, color 0.15s;
   }
+
+  .tab svg { width: 20px; height: 20px; }
 
   .tab.active {
     background: var(--button);
@@ -75,46 +101,98 @@
 
   .card {
     background: var(--secondary-bg);
-    border-radius: 14px;
-    padding: 18px;
+    border-radius: 16px;
+    padding: 16px;
     margin-bottom: 12px;
-  }
-
-  .stat-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(128,128,128,0.15);
-  }
-
-  .stat-row:last-child { border-bottom: none; }
-
-  .stat-label {
-    color: var(--hint);
-    font-size: 14px;
-  }
-
-  .stat-value {
-    font-size: 18px;
-    font-weight: 700;
   }
 
   .points-hero {
     text-align: center;
-    padding: 24px 0 16px;
+    padding: 22px 16px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--button) 18%, var(--secondary-bg)), var(--secondary-bg));
   }
 
   .points-hero .num {
-    font-size: 44px;
+    font-size: 42px;
     font-weight: 800;
     color: var(--button);
+    line-height: 1;
   }
 
   .points-hero .label {
     color: var(--hint);
+    font-size: 12px;
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .stat-card {
+    background: var(--secondary-bg);
+    border-radius: 14px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .stat-card .icon {
+    width: 22px;
+    height: 22px;
+    color: var(--button);
+  }
+
+  .stat-card .value {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .stat-card .label {
+    font-size: 11px;
+    color: var(--hint);
+  }
+
+  .flex-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-radius: 16px;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--button) 12%, var(--secondary-bg)), var(--secondary-bg));
+  }
+
+  .flex-card .icon {
+    width: 32px;
+    height: 32px;
+    color: var(--button);
+    flex-shrink: 0;
+  }
+
+  .flex-card .title {
     font-size: 13px;
-    margin-top: 4px;
+    color: var(--hint);
+    margin-bottom: 2px;
+  }
+
+  .flex-card .days {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--hint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 18px 0 8px 4px;
   }
 
   .lb-row {
@@ -122,16 +200,41 @@
     align-items: center;
     gap: 10px;
     padding: 10px 4px;
-    border-bottom: 1px solid rgba(128,128,128,0.15);
   }
 
-  .lb-row:last-child { border-bottom: none; }
+  .lb-row + .lb-row {
+    border-top: 1px solid color-mix(in srgb, var(--hint) 20%, transparent);
+  }
 
   .lb-rank {
-    width: 28px;
-    text-align: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 700;
-    font-size: 15px;
+    font-size: 12px;
+    background: color-mix(in srgb, var(--hint) 15%, transparent);
+    flex-shrink: 0;
+  }
+
+  .lb-rank.gold { background: var(--gold); color: #fff; }
+  .lb-rank.silver { background: var(--silver); color: #fff; }
+  .lb-rank.bronze { background: var(--bronze); color: #fff; }
+
+  .lb-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--button) 25%, var(--secondary-bg));
+    color: var(--button);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
   }
 
   .lb-name {
@@ -149,22 +252,56 @@
   }
 
   .lb-row.me {
-    background: rgba(36, 129, 204, 0.1);
-    border-radius: 10px;
+    background: color-mix(in srgb, var(--button) 12%, transparent);
+    border-radius: 12px;
   }
 
-  .empty {
-    text-align: center;
-    color: var(--hint);
-    padding: 40px 0;
-    font-size: 14px;
+  .hist-row {
+    padding: 12px 4px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
   }
 
-  .loading {
+  .hist-row + .hist-row {
+    border-top: 1px solid color-mix(in srgb, var(--hint) 20%, transparent);
+  }
+
+  .hist-icon {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .hist-icon.correct { color: var(--good); }
+  .hist-icon.wrong { color: var(--bad); }
+
+  .hist-body { flex: 1; min-width: 0; }
+
+  .hist-question {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .hist-answer {
+    font-size: 12px;
+    color: var(--hint);
+  }
+
+  .hist-points {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--button);
+    white-space: nowrap;
+  }
+
+  .empty, .loading {
     text-align: center;
     color: var(--hint);
-    padding: 40px 0;
-    font-size: 14px;
+    padding: 36px 12px;
+    font-size: 13px;
   }
 
   .hidden { display: none; }
@@ -173,14 +310,15 @@
 <body>
 
 <div class="header">
-  <div class="emoji">🎓</div>
+  <div class="badge" id="icon-cap"></div>
   <h1>Harvard Path</h1>
   <p>Going to Harvard | Garvard sari</p>
 </div>
 
 <div class="tabs">
-  <div class="tab active" data-tab="profile">👤 Profil</div>
-  <div class="tab" data-tab="leaderboard">🏆 Reyting</div>
+  <div class="tab active" data-tab="profile"><span class="icon-slot" id="icon-user"></span>Profil</div>
+  <div class="tab" data-tab="leaderboard"><span class="icon-slot" id="icon-trophy"></span>Reyting</div>
+  <div class="tab" data-tab="history"><span class="icon-slot" id="icon-history"></span>Tarix</div>
 </div>
 
 <div id="profile-view">
@@ -190,22 +328,36 @@
       <div class="num" id="p-points">0</div>
       <div class="label">jami ball</div>
     </div>
-    <div class="card">
-      <div class="stat-row">
-        <span class="stat-label">✅ To'g'ri javoblar</span>
-        <span class="stat-value" id="p-correct">0</span>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span class="icon" id="icon-check"></span>
+        <span class="value" id="p-correct">0</span>
+        <span class="label">To'g'ri javob</span>
       </div>
-      <div class="stat-row">
-        <span class="stat-label">📝 Jami javoblar</span>
-        <span class="stat-value" id="p-total">0</span>
+      <div class="stat-card">
+        <span class="icon" id="icon-target"></span>
+        <span class="value" id="p-accuracy">0%</span>
+        <span class="label">Aniqlik</span>
       </div>
-      <div class="stat-row">
-        <span class="stat-label">🎯 Aniqlik</span>
-        <span class="stat-value" id="p-accuracy">0%</span>
+      <div class="stat-card">
+        <span class="icon" id="icon-list"></span>
+        <span class="value" id="p-total">0</span>
+        <span class="label">Jami javob</span>
       </div>
-      <div class="stat-row">
-        <span class="stat-label">🏅 O'rningiz</span>
-        <span class="stat-value" id="p-rank">—</span>
+      <div class="stat-card">
+        <span class="icon" id="icon-medal"></span>
+        <span class="value" id="p-rank">—</span>
+        <span class="label">O'rningiz</span>
+      </div>
+    </div>
+
+    <div class="section-title">FLEX countdown</div>
+    <div class="card flex-card" id="flex-card">
+      <span class="icon" id="icon-plane"></span>
+      <div>
+        <div class="title" id="flex-title">Yuklanmoqda...</div>
+        <div class="days" id="flex-days"></div>
       </div>
     </div>
   </div>
@@ -216,7 +368,37 @@
   <div id="lb-content" class="card hidden"></div>
 </div>
 
+<div id="history-view" class="hidden">
+  <div id="hist-loading" class="loading">Yuklanmoqda...</div>
+  <div id="hist-content" class="card hidden"></div>
+</div>
+
 <script>
+  // --- SVG ikonkalar (Feather-uslub, stroke=currentColor) ---
+  const ICONS = {
+    cap: '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/><path d="M22 10v6"/></svg>',
+    user: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/></svg>',
+    trophy: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v5a4 4 0 0 1-8 0V4Z"/><path d="M8 5H5a3 3 0 0 0 3 4"/><path d="M16 5h3a3 3 0 0 1-3 4"/><path d="M12 13v3"/><path d="M9 20h6"/><path d="M10 16h4l1 4H9l1-4Z"/></svg>',
+    history: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg>',
+    check: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    target: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
+    list: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6h.01"/><path d="M4 12h.01"/><path d="M4 18h.01"/></svg>',
+    medal: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="15" r="6"/><path d="m9 10-3-7"/><path d="m15 10 3-7"/><path d="M9 3h6"/></svg>',
+    plane: '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-1 .1-1.3.5l-.6.7c-.4.5-.3 1.2.3 1.5L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 2.9 5.8c.3.6 1 .7 1.5.3l.7-.6c.4-.3.6-.8.5-1.3Z"/></svg>',
+    checkCircle: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg>',
+    xCircle: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>',
+  };
+
+  document.getElementById('icon-cap').innerHTML = ICONS.cap;
+  document.getElementById('icon-user').innerHTML = ICONS.user;
+  document.getElementById('icon-trophy').innerHTML = ICONS.trophy;
+  document.getElementById('icon-history').innerHTML = ICONS.history;
+  document.getElementById('icon-check').innerHTML = ICONS.check;
+  document.getElementById('icon-target').innerHTML = ICONS.target;
+  document.getElementById('icon-list').innerHTML = ICONS.list;
+  document.getElementById('icon-medal').innerHTML = ICONS.medal;
+  document.getElementById('icon-plane').innerHTML = ICONS.plane;
+
   const tg = window.Telegram?.WebApp;
   if (tg) {
     tg.ready();
@@ -240,6 +422,14 @@
     return res.json();
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function initialOf(name) {
+    return (name || '?').trim().charAt(0).toUpperCase();
+  }
+
   async function loadProfile() {
     const loadingEl = document.getElementById('profile-loading');
     const contentEl = document.getElementById('profile-content');
@@ -260,6 +450,16 @@
     } catch (e) {
       loadingEl.textContent = 'Yuklab bo\'lmadi. Qayta urinib ko\'ring.';
     }
+
+    try {
+      const deadline = await apiGet('/api/deadline');
+      document.getElementById('flex-title').textContent = deadline.isExact
+        ? deadline.name
+        : deadline.name + ' (taxminiy)';
+      document.getElementById('flex-days').textContent = deadline.daysLeft + ' kun qoldi';
+    } catch (e) {
+      document.getElementById('flex-title').textContent = 'Ma\'lumot yo\'q';
+    }
   }
 
   async function loadLeaderboard() {
@@ -268,15 +468,17 @@
     try {
       const data = await apiGet('/api/leaderboard');
       if (!data.leaderboard || data.leaderboard.length === 0) {
-        loadingEl.textContent = 'Hali hech kim ball to\'plamagan. Birinchi bo\'ling! 🚀';
+        loadingEl.textContent = 'Hali hech kim ball to\'plamagan. Birinchi bo\'ling!';
         return;
       }
-      const medals = ['🥇', '🥈', '🥉'];
+      const rankClass = ['gold', 'silver', 'bronze'];
       contentEl.innerHTML = data.leaderboard.map((u, i) => {
         const name = u.username ? '@' + u.username : (u.first_name || 'Foydalanuvchi');
-        const rank = medals[i] || (i + 1);
         const meClass = u.is_me ? ' me' : '';
-        return '<div class="lb-row' + meClass + '"><span class="lb-rank">' + rank + '</span>' +
+        const rc = rankClass[i] || '';
+        return '<div class="lb-row' + meClass + '">' +
+          '<span class="lb-rank ' + rc + '">' + (i + 1) + '</span>' +
+          '<span class="lb-avatar">' + escapeHtml(initialOf(u.first_name || u.username)) + '</span>' +
           '<span class="lb-name">' + escapeHtml(name) + '</span>' +
           '<span class="lb-points">' + u.points + '</span></div>';
       }).join('');
@@ -287,21 +489,57 @@
     }
   }
 
-  function escapeHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  async function loadHistory() {
+    const loadingEl = document.getElementById('hist-loading');
+    const contentEl = document.getElementById('hist-content');
+    try {
+      const data = await apiGet('/api/history');
+      if (data.error) {
+        loadingEl.textContent = data.error;
+        return;
+      }
+      if (!data.history || data.history.length === 0) {
+        loadingEl.textContent = 'Hali viktorinaga javob bermagansiz.';
+        return;
+      }
+      contentEl.innerHTML = data.history.map((h) => {
+        const iconSvg = h.is_correct ? ICONS.checkCircle : ICONS.xCircle;
+        const iconClass = h.is_correct ? 'correct' : 'wrong';
+        return '<div class="hist-row">' +
+          '<span class="hist-icon ' + iconClass + '">' + iconSvg + '</span>' +
+          '<div class="hist-body">' +
+            '<div class="hist-question">' + escapeHtml(h.question) + '</div>' +
+            '<div class="hist-answer">Javobingiz: ' + escapeHtml(h.chosen) + '</div>' +
+          '</div>' +
+          '<span class="hist-points">+' + h.points + '</span>' +
+        '</div>';
+      }).join('');
+      loadingEl.classList.add('hidden');
+      contentEl.classList.remove('hidden');
+    } catch (e) {
+      loadingEl.textContent = 'Yuklab bo\'lmadi. Qayta urinib ko\'ring.';
+    }
   }
+
+  const loaders = { profile: loadProfile, leaderboard: loadLeaderboard, history: loadHistory };
+  const loaded = {};
 
   document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
       const target = tab.dataset.tab;
-      document.getElementById('profile-view').classList.toggle('hidden', target !== 'profile');
-      document.getElementById('leaderboard-view').classList.toggle('hidden', target !== 'leaderboard');
-      if (target === 'leaderboard') loadLeaderboard();
+      ['profile', 'leaderboard', 'history'].forEach((v) => {
+        document.getElementById(v + '-view').classList.toggle('hidden', v !== target);
+      });
+      if (!loaded[target]) {
+        loaded[target] = true;
+        loaders[target]();
+      }
     });
   });
 
+  loaded.profile = true;
   loadProfile();
 </script>
 
