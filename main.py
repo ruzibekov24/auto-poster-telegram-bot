@@ -64,11 +64,26 @@ LOG_FILE = BASE_DIR / "bot.log"
 MAX_RECENT_FACTS = 20
 MAX_GENERATION_ATTEMPTS = 3
 
-# FLEX (Future Leaders Exchange Program) arizasining ANIQ muddati ma'lum bo'lganda
-# shu ro'yxatga qo'shiladi, masalan:
-# {"university": "FLEX", "round": "Ariza topshirish", "date": "2026-09-15"}
-# Ro'yxat bo'sh bo'lsa, bot APPROX_ROUNDS asosida TAXMINIY countdown ko'rsatadi.
-EXACT_DEADLINES: list[dict] = []
+# FLEX (Future Leaders Exchange Program) arizasining ANIQ muddati "deadline.json"
+# faylida saqlanadi (admin-worker/Telegram bot /deadline buyrug'i shu faylni yangilaydi).
+# Fayl bo'sh/mavjud bo'lmasa, bot APPROX_ROUNDS asosida TAXMINIY countdown ko'rsatadi.
+DEADLINE_FILE = BASE_DIR / "deadline.json"
+
+
+def load_exact_deadlines() -> list[dict]:
+    if not DEADLINE_FILE.exists():
+        return []
+    try:
+        with open(DEADLINE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not data.get("date"):
+        return []
+    return [{"university": "FLEX", "round": data.get("round", "Ariza topshirish"), "date": data["date"]}]
+
+
+EXACT_DEADLINES: list[dict] = load_exact_deadlines()
 
 # FLEX dasturi arizasi har yili taqriban sentyabr o'rtalarida yopiladi — aniq sana
 # e'lon qilinmaguncha shu taxminiy sana asosida countdown ko'rsatiladi (foydalanuvchi

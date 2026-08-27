@@ -5,8 +5,14 @@
  * saytdagi login/Lessons/Quiz funksiyalariga hech qanday ta'sir qilmaydi.
  *
  * Buyruqlar:
- *   /fact                  — hoziroq shaxsiy fakt (hammaga ochiq)
- *   /post_now facts|poll|flex — kanalga hoziroq post yuborish (faqat admin)
+ *   /help                      — buyruqlar ro'yxati
+ *   /fact                      — hoziroq shaxsiy fakt (hammaga ochiq)
+ *   /post_now facts|poll|flex  — kanalga hoziroq post yuborish (admin)
+ *   /preview facts|poll|flex   — kanalga YUBORMASDAN, sizga preview (admin)
+ *   /deadline YYYY-MM-DD|clear — FLEX aniq muddatini o'rnatish (admin)
+ *   /pause / /resume           — kunlik avtomatik postlarni to'xtatish/yoqish (admin)
+ *   /stats                     — oxirgi postlar holati + pauza holati (admin)
+ *   /next                      — keyingi avtomatik post qachon ketishi (admin)
  */
 
 interface TelegramUpdate {
@@ -24,9 +30,22 @@ export interface Env {
   CHANNEL_ID: string;
   CHANNEL_USERNAME: string;
   GEMINI_API_KEY: string;
-  ADMIN_CHAT_ID: string; // faqat shu Telegram user_id /post_now ishlata oladi
+  ADMIN_CHAT_ID: string; // faqat shu Telegram user_id admin buyruqlarini ishlata oladi
   WEBHOOK_SECRET: string; // Telegram secret_token tekshiruvi uchun
+  GITHUB_TOKEN: string; // /pause, /resume, /stats, /deadline uchun (repo+workflow huquqi)
 }
+
+// GitHub repo joylashuvi — main.py'ni ishga tushiradigan GitHub Actions shu yerda
+const GITHUB_OWNER = "ruzibekov24";
+const GITHUB_REPO = "auto-poster-telegram-bot";
+const WORKFLOW_FILE = "post.yml";
+
+// post.yml'dagi cron jadvali bilan qo'lda sinxronlab turing (UTC soatlari)
+const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
+  { hourUtc: 4, type: "facts", label: "🧠 Fact post" },
+  { hourUtc: 9, type: "poll", label: "🗳 Poll/Viktorina" },
+  { hourUtc: 15, type: "flex", label: "✈️ FLEX countdown" },
+];
 
 const GEMINI_MODEL = "gemini-3.6-flash";
 const SPLIT_MARKER = "|||";
@@ -135,6 +154,67 @@ async function generateFact(env: Env, category: string): Promise<{ fact: string;
 }
 
 // ---------------------------------------------------------------------------
+// GitHub API — /pause, /resume, /stats, /deadline uchun
+// ---------------------------------------------------------------------------
+
+async function ghRequest(env: Env, method: string, path: string, body?: unknown): Promise<any> {
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "harvard-path-admin-bot",
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    throw new Error(`GitHub API xatoligi (${method} ${path}): ${res.status} ${JSON.stringify(data)}`);
+  }
+  return data;
+}
+
+async function getExactDeadline(env: Env): Promise<{ date: string; round: string } | null> {
+  try {
+    const file = await ghRequest(env, "GET", "/contents/deadline.json");
+    const content = JSON.parse(atob((file.content as string).replace(/\n/g, "")));
+    if (content?.date) return { date: content.date, round: content.round ?? "Ariza topshirish" };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function setDeadline(env: Env, date: string | null, round = "Ariza topshirish"): Promise<void> {
+  const path = "/contents/deadline.json";
+  const existing = await ghRequest(env, "GET", path).catch(() => null);
+  const newContent = date ? { date, round } : {};
+  const body = {
+    message: date ? `chore: FLEX muddatini o'rnatish (${date}) [admin bot]` : "chore: FLEX muddatini tozalash [admin bot]",
+    content: btoa(JSON.stringify(newContent, null, 2) + "\n"),
+    sha: existing?.sha,
+  };
+  await ghRequest(env, "PUT", path, body);
+}
+
+async function getWorkflowState(env: Env): Promise<string> {
+  const data = await ghRequest(env, "GET", `/actions/workflows/${WORKFLOW_FILE}`);
+  return data.state as string; // "active" | "disabled_manually" | ...
+}
+
+async function setWorkflowEnabled(env: Env, enabled: boolean): Promise<void> {
+  await ghRequest(env, "PUT", `/actions/workflows/${WORKFLOW_FILE}/${enabled ? "enable" : "disable"}`);
+}
+
+async function getRecentRuns(env: Env, perPage = 5): Promise<any[]> {
+  const data = await ghRequest(env, "GET", `/actions/workflows/${WORKFLOW_FILE}/runs?per_page=${perPage}`);
+  return data.workflow_runs ?? [];
+}
+
+// ---------------------------------------------------------------------------
 // Flex/countdown
 // ---------------------------------------------------------------------------
 
@@ -154,6 +234,21 @@ function nextApproxDeadline(): { name: string; daysLeft: number } {
     }
   }
   return best!;
+}
+
+async function computeDeadline(env: Env): Promise<{ name: string; daysLeft: number; isExact: boolean }> {
+  const exact = await getExactDeadline(env).catch(() => null);
+  if (exact) {
+    const today = new Date();
+    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    const target = Date.parse(`${exact.date}T00:00:00Z`);
+    const daysLeft = Math.round((target - todayUtc) / 86400000);
+    if (!Number.isNaN(daysLeft) && daysLeft >= 0) {
+      return { name: `FLEX — ${exact.round}`, daysLeft, isExact: true };
+    }
+  }
+  const approx = nextApproxDeadline();
+  return { ...approx, isExact: false };
 }
 
 function buildFlexPrompt(): string {
@@ -182,11 +277,13 @@ async function buildFlexHtml(env: Env): Promise<string> {
   const [factPart, reactionPart] = raw.split(SPLIT_MARKER);
   const fact = (factPart ?? "").trim();
   const reaction = (reactionPart ?? "").trim() || "✈️";
-  const { name, daysLeft } = nextApproxDeadline();
+  const { name, daysLeft, isExact } = await computeDeadline(env);
 
   const hook = FLEX_HOOKS[Math.floor(Math.random() * FLEX_HOOKS.length)];
   const factHtml = applyBoldMarkup(escapeHtml(fact));
-  const countdownLine = `📅 Taxminan <b>~${daysLeft} kun</b> qoldi — ${escapeHtml(name)} (aniq sana e'lon qilinganda yangilanadi)`;
+  const countdownLine = isExact
+    ? `📅 <b>${daysLeft} kun qoldi</b> — ${escapeHtml(name)}`
+    : `📅 Taxminan <b>~${daysLeft} kun</b> qoldi — ${escapeHtml(name)} (aniq sana e'lon qilinganda yangilanadi)`;
 
   return [
     escapeHtml(hook),
@@ -298,10 +395,7 @@ async function handleFactCommand(env: Env, chatId: number) {
 }
 
 async function handlePostNowCommand(env: Env, chatId: number, fromId: number, args: string[]) {
-  if (String(fromId) !== env.ADMIN_CHAT_ID) {
-    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "⛔ Bu buyruq faqat admin uchun.");
-    return;
-  }
+  if (!(await requireAdmin(env, chatId, fromId))) return;
 
   const target = args[0];
   if (!["facts", "poll", "flex"].includes(target)) {
@@ -346,6 +440,150 @@ function buildFactHtmlForChannel(env: Env, category: string, fact: string, react
   ].join("\n");
 }
 
+function isAdmin(env: Env, fromId: number): boolean {
+  return String(fromId) === env.ADMIN_CHAT_ID;
+}
+
+async function requireAdmin(env: Env, chatId: number, fromId: number): Promise<boolean> {
+  if (isAdmin(env, fromId)) return true;
+  await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "⛔ Bu buyruq faqat admin uchun.");
+  return false;
+}
+
+const HELP_TEXT = `👋 Mavjud buyruqlar:
+
+/fact — hoziroq shaxsiy fakt (hammaga ochiq)
+
+Quyidagilar faqat admin uchun:
+/post_now facts|poll|flex — kanalga hoziroq post yuborish
+/preview facts|poll|flex — kanalga yubormasdan, sizga preview
+/deadline YYYY-MM-DD — FLEX aniq muddatini o'rnatish
+/deadline clear — aniq muddatni bekor qilish (taxminiyga qaytarish)
+/pause — kunlik avtomatik postlarni to'xtatish
+/resume — kunlik avtomatik postlarni qayta yoqish
+/stats — oxirgi postlar holati
+/next — keyingi avtomatik post qachon ketishi`;
+
+async function handlePreviewCommand(env: Env, chatId: number, fromId: number, args: string[]) {
+  if (!(await requireAdmin(env, chatId, fromId))) return;
+
+  const target = args[0];
+  if (!["facts", "poll", "flex"].includes(target)) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Foydalanish: /preview facts|poll|flex");
+    return;
+  }
+
+  await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `👀 Preview (kanalga YUBORILMAYDI): ${target}...`);
+
+  try {
+    if (target === "facts") {
+      const category = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+      const { fact, reaction } = await generateFact(env, category);
+      const html = buildFactHtmlForChannel(env, category, fact, reaction);
+      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, html, true);
+    } else if (target === "flex") {
+      const html = await buildFlexHtml(env);
+      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, html, true);
+    } else {
+      const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
+      const poll = await generatePoll(env, pollType);
+      await sendPoll(env.ADMIN_BOT_TOKEN, chatId, poll, pollType);
+    }
+  } catch (e) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
+  }
+}
+
+async function handleDeadlineCommand(env: Env, chatId: number, fromId: number, args: string[]) {
+  if (!(await requireAdmin(env, chatId, fromId))) return;
+
+  const arg = args[0];
+  if (!arg) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Foydalanish: /deadline YYYY-MM-DD yoki /deadline clear");
+    return;
+  }
+
+  try {
+    if (arg === "clear") {
+      await setDeadline(env, null);
+      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "✅ Aniq muddat bekor qilindi — endi taxminiy sana ishlatiladi.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "❌ Sana formati noto'g'ri. Masalan: /deadline 2026-09-15");
+      return;
+    }
+    await setDeadline(env, arg);
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `✅ FLEX muddati ${arg} qilib o'rnatildi. Kunlik postlar endi ANIQ countdown ko'rsatadi.`);
+  } catch (e) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
+  }
+}
+
+async function handlePauseCommand(env: Env, chatId: number, fromId: number, enable: boolean) {
+  if (!(await requireAdmin(env, chatId, fromId))) return;
+  try {
+    await setWorkflowEnabled(env, enable);
+    await sendMessage(
+      env.ADMIN_BOT_TOKEN,
+      chatId,
+      enable ? "▶️ Kunlik avtomatik postlar qayta yoqildi." : "⏸ Kunlik avtomatik postlar to'xtatildi."
+    );
+  } catch (e) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
+  }
+}
+
+async function handleStatsCommand(env: Env, chatId: number, fromId: number) {
+  if (!(await requireAdmin(env, chatId, fromId))) return;
+  try {
+    const [state, runs] = await Promise.all([getWorkflowState(env), getRecentRuns(env, 5)]);
+    const pauseLine = state === "active" ? "▶️ Ishlayapti" : "⏸ To'xtatilgan";
+
+    const runLines = runs.map((r) => {
+      const icon = r.status !== "completed" ? "🟡" : r.conclusion === "success" ? "✅" : "❌";
+      const when = new Date(r.created_at).toISOString().slice(0, 16).replace("T", " ");
+      return `${icon} ${r.display_title ?? r.name} — ${when} UTC`;
+    });
+
+    const text = [`📊 Holat: ${pauseLine}`, "", "Oxirgi postlar:", ...(runLines.length ? runLines : ["(hali yo'q)"])].join("\n");
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, text);
+  } catch (e) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
+  }
+}
+
+async function handleNextCommand(env: Env, chatId: number, fromId: number) {
+  if (!(await requireAdmin(env, chatId, fromId))) return;
+  try {
+    const state = await getWorkflowState(env);
+    if (state !== "active") {
+      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "⏸ Avtomatik postlar hozir to'xtatilgan (/resume bilan yoqing).");
+      return;
+    }
+
+    const now = new Date();
+    const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    let best: { type: string; label: string; minutesUntil: number } | null = null;
+    for (const s of SCHEDULE_UTC) {
+      const slotMinutes = s.hourUtc * 60;
+      const diff = (slotMinutes - nowMinutes + 1440) % 1440;
+      if (!best || diff < best.minutesUntil) {
+        best = { type: s.type, label: s.label, minutesUntil: diff === 0 ? 1440 : diff };
+      }
+    }
+    const hours = Math.floor(best!.minutesUntil / 60);
+    const minutes = best!.minutesUntil % 60;
+    await sendMessage(
+      env.ADMIN_BOT_TOKEN,
+      chatId,
+      `⏭ Keyingi post: ${best!.label}\n🕐 ${hours} soat ${minutes} daqiqadan keyin`
+    );
+  } catch (e) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Worker entrypoint
 // ---------------------------------------------------------------------------
@@ -382,14 +620,21 @@ export default {
       if (text === "/fact" || text === "/fact@" || text.startsWith("/fact ")) {
         await handleFactCommand(env, chatId);
       } else if (text.startsWith("/post_now")) {
-        const args = text.split(/\s+/).slice(1);
-        await handlePostNowCommand(env, chatId, fromId, args);
-      } else if (text === "/start") {
-        await sendMessage(
-          env.ADMIN_BOT_TOKEN,
-          chatId,
-          "👋 Salom! /fact — hoziroq fakt olish uchun. /post_now facts|poll|flex — adminlar uchun."
-        );
+        await handlePostNowCommand(env, chatId, fromId, text.split(/\s+/).slice(1));
+      } else if (text.startsWith("/preview")) {
+        await handlePreviewCommand(env, chatId, fromId, text.split(/\s+/).slice(1));
+      } else if (text.startsWith("/deadline")) {
+        await handleDeadlineCommand(env, chatId, fromId, text.split(/\s+/).slice(1));
+      } else if (text === "/pause") {
+        await handlePauseCommand(env, chatId, fromId, false);
+      } else if (text === "/resume") {
+        await handlePauseCommand(env, chatId, fromId, true);
+      } else if (text === "/stats") {
+        await handleStatsCommand(env, chatId, fromId);
+      } else if (text === "/next") {
+        await handleNextCommand(env, chatId, fromId);
+      } else if (text === "/start" || text === "/help") {
+        await sendMessage(env.ADMIN_BOT_TOKEN, chatId, HELP_TEXT);
       }
     } catch (e) {
       // Xatolikni foydalanuvchiga ko'rsatamiz, lekin Worker'ni yiqitmaymiz
