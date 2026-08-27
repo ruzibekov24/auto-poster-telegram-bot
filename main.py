@@ -151,6 +151,15 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 SPLIT_MARKER = "|||"
 
+# Ba'zi emojilar (💀, 💅 va shunga o'xshash) juda ko'p takrorlanib ketayotgani
+# sababli, barcha promptlarda ularni ishlatishni taqiqlaymiz — xilma-xillik uchun
+EMOJI_BAN_NOTE = (
+    "MUHIM: 💀 va 💅 emojilarini HECH QACHON ishlatma — ular juda ko'p "
+    "takrorlanib ketgan. Buning o'rniga har safar boshqa-boshqa, mavzuga mos "
+    "emojilardan foydalan (masalan 😭 🤯 😂 🔥 ✨ 👀 🚀 🥲 kabi xilma-xil "
+    "variantlardan tanlab, bir xilini qayta-qayta ishlatma)."
+)
+
 # Gemini API vaqtinchalik band bo'lib qolsa (503 kabi) qayta urinish sozlamalari
 API_RETRY_ATTEMPTS = 4
 API_RETRY_BASE_DELAY = 3  # soniya, har urinishda ko'payadi: 3s, 6s, 9s...
@@ -199,8 +208,10 @@ Ikkita qism yoz (ingliz tilida):
    faqat eng ta'sirli qismga.
 
 2) REAKSIYA: shu faktga o'quvchining lahzalik hissiy reaksiyasi — juda qisqa (3-6 so'z),
-   hazil-mutoyibali, emoji bilan boyitilgan jumla (masalan "not me screaming rn 💀" kabi
+   hazil-mutoyibali, emoji bilan boyitilgan jumla (masalan "not me screaming rn" kabi
    uslubda). Bu qator Telegram'da spoiler (blur) ostida yashirinadi.
+
+{EMOJI_BAN_NOTE}
 
 Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
 <FAKT matni>
@@ -319,6 +330,8 @@ Ikkita qism yoz (ingliz tilida):
    hazil-mutoyibali, emoji bilan boyitilgan jumla. Bu qator Telegram'da spoiler (blur)
    ostida yashirinadi.
 
+{EMOJI_BAN_NOTE}
+
 Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
 <MINI-FAKT matni>
 {SPLIT_MARKER}
@@ -420,6 +433,8 @@ Mavzu: {topic}
 Talablar:
 - 3-4 ta qisqa javob varianti (har biri max 80 belgi).
 - Savol va variantlar qiziqarli, jiddiy/akademik bo'lmagan ohangda.
+
+{EMOJI_BAN_NOTE}
 
 Javobni FAQAT quyidagi JSON formatida qaytar, boshqa hech qanday matn yozma:
 {schema_note}{avoid_block}"""

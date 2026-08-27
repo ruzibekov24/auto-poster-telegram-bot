@@ -69,6 +69,13 @@ const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
 const GEMINI_MODEL = "gemini-3.6-flash";
 const SPLIT_MARKER = "|||";
 
+// main.py'dagi EMOJI_BAN_NOTE bilan qo'lda sinxronlab turing
+const EMOJI_BAN_NOTE =
+  "MUHIM: 💀 va 💅 emojilarini HECH QACHON ishlatma — ular juda ko'p takrorlanib " +
+  "ketgan. Buning o'rniga har safar boshqa-boshqa, mavzuga mos emojilardan " +
+  "foydalan (masalan 😭 🤯 😂 🔥 ✨ 👀 🚀 🥲 kabi xilma-xil variantlardan tanlab, " +
+  "bir xilini qayta-qayta ishlatma).";
+
 const CATEGORY_EMOJI: Record<string, string> = {
   "Crazy facts (fizika, koinot, inson tanasi, hayvonot dunyosi haqida hayratlanarli faktlar)": "🤯",
   "Fun facts (kulgili, kutilmagan statistikalar)": "😂",
@@ -156,6 +163,8 @@ Ikkita qism yoz (ingliz tilida):
 
 2) REAKSIYA: shu faktga o'quvchining lahzalik hissiy reaksiyasi — juda qisqa (3-6 so'z),
    hazil-mutoyibali, emoji bilan boyitilgan jumla. Bu qator Telegram'da spoiler ostida yashiriladi.
+
+${EMOJI_BAN_NOTE}
 
 Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
 <FAKT matni>
@@ -285,6 +294,8 @@ Ikkita qism yoz (ingliz tilida):
    YOZMA. Matn ichidagi 1 ta kalit so'zni **so'z** shaklida belgila.
 2) REAKSIYA: juda qisqa (3-6 so'z) hissiy reaksiya, emoji bilan.
 
+${EMOJI_BAN_NOTE}
+
 Javobni FAQAT quyidagi formatda qaytar:
 <MINI-FAKT matni>
 ${SPLIT_MARKER}
@@ -350,6 +361,8 @@ copywriter'san. Auditoriya: Harvard/top universitetlarga tayyorlanayotgan Gen-Z 
 Mavzu: ${topic}
 
 Talablar: 3-4 ta qisqa javob varianti (har biri max 80 belgi), qiziqarli/hazil ohangda.
+
+${EMOJI_BAN_NOTE}
 
 Javobni FAQAT quyidagi JSON formatida qaytar:
 ${schema}`;
