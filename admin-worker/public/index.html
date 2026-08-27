@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Harvard Path</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #111111;
+    --hint: #707579;
+    --link: #2481cc;
+    --button: #2481cc;
+    --button-text: #ffffff;
+    --secondary-bg: #f0f0f0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 16px;
+    padding-bottom: 32px;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  .header .emoji {
+    font-size: 40px;
+  }
+
+  .header h1 {
+    font-size: 20px;
+    margin: 8px 0 2px;
+  }
+
+  .header p {
+    color: var(--hint);
+    font-size: 13px;
+    margin: 0;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    background: var(--secondary-bg);
+    border-radius: 12px;
+    padding: 4px;
+  }
+
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--hint);
+    user-select: none;
+  }
+
+  .tab.active {
+    background: var(--button);
+    color: var(--button-text);
+  }
+
+  .card {
+    background: var(--secondary-bg);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 12px;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(128,128,128,0.15);
+  }
+
+  .stat-row:last-child { border-bottom: none; }
+
+  .stat-label {
+    color: var(--hint);
+    font-size: 14px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .points-hero {
+    text-align: center;
+    padding: 24px 0 16px;
+  }
+
+  .points-hero .num {
+    font-size: 44px;
+    font-weight: 800;
+    color: var(--button);
+  }
+
+  .points-hero .label {
+    color: var(--hint);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .lb-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 4px;
+    border-bottom: 1px solid rgba(128,128,128,0.15);
+  }
+
+  .lb-row:last-child { border-bottom: none; }
+
+  .lb-rank {
+    width: 28px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .lb-name {
+    flex: 1;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lb-points {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--button);
+  }
+
+  .lb-row.me {
+    background: rgba(36, 129, 204, 0.1);
+    border-radius: 10px;
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--hint);
+    padding: 40px 0;
+    font-size: 14px;
+  }
+
+  .loading {
+    text-align: center;
+    color: var(--hint);
+    padding: 40px 0;
+    font-size: 14px;
+  }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="emoji">🎓</div>
+  <h1>Harvard Path</h1>
+  <p>Going to Harvard | Garvard sari</p>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="profile">👤 Profil</div>
+  <div class="tab" data-tab="leaderboard">🏆 Reyting</div>
+</div>
+
+<div id="profile-view">
+  <div id="profile-loading" class="loading">Yuklanmoqda...</div>
+  <div id="profile-content" class="hidden">
+    <div class="card points-hero">
+      <div class="num" id="p-points">0</div>
+      <div class="label">jami ball</div>
+    </div>
+    <div class="card">
+      <div class="stat-row">
+        <span class="stat-label">✅ To'g'ri javoblar</span>
+        <span class="stat-value" id="p-correct">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">📝 Jami javoblar</span>
+        <span class="stat-value" id="p-total">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">🎯 Aniqlik</span>
+        <span class="stat-value" id="p-accuracy">0%</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">🏅 O'rningiz</span>
+        <span class="stat-value" id="p-rank">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="leaderboard-view" class="hidden">
+  <div id="lb-loading" class="loading">Yuklanmoqda...</div>
+  <div id="lb-content" class="card hidden"></div>
+</div>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    const theme = tg.themeParams || {};
+    const root = document.documentElement.style;
+    if (theme.bg_color) root.setProperty('--bg', theme.bg_color);
+    if (theme.text_color) root.setProperty('--text', theme.text_color);
+    if (theme.hint_color) root.setProperty('--hint', theme.hint_color);
+    if (theme.link_color) root.setProperty('--link', theme.link_color);
+    if (theme.button_color) root.setProperty('--button', theme.button_color);
+    if (theme.button_text_color) root.setProperty('--button-text', theme.button_text_color);
+    if (theme.secondary_bg_color) root.setProperty('--secondary-bg', theme.secondary_bg_color);
+  }
+
+  const initData = tg?.initData || '';
+
+  async function apiGet(path) {
+    const res = await fetch(path, { headers: { 'X-Telegram-Init-Data': initData } });
+    if (!res.ok) throw new Error('Xatolik: ' + res.status);
+    return res.json();
+  }
+
+  async function loadProfile() {
+    const loadingEl = document.getElementById('profile-loading');
+    const contentEl = document.getElementById('profile-content');
+    try {
+      const data = await apiGet('/api/me');
+      if (data.error) {
+        loadingEl.textContent = data.error;
+        return;
+      }
+      document.getElementById('p-points').textContent = data.points;
+      document.getElementById('p-correct').textContent = data.correct_answers;
+      document.getElementById('p-total').textContent = data.total_answers;
+      const accuracy = data.total_answers > 0 ? Math.round((data.correct_answers / data.total_answers) * 100) : 0;
+      document.getElementById('p-accuracy').textContent = accuracy + '%';
+      document.getElementById('p-rank').textContent = data.rank ? '#' + data.rank : '—';
+      loadingEl.classList.add('hidden');
+      contentEl.classList.remove('hidden');
+    } catch (e) {
+      loadingEl.textContent = 'Yuklab bo\'lmadi. Qayta urinib ko\'ring.';
+    }
+  }
+
+  async function loadLeaderboard() {
+    const loadingEl = document.getElementById('lb-loading');
+    const contentEl = document.getElementById('lb-content');
+    try {
+      const data = await apiGet('/api/leaderboard');
+      if (!data.leaderboard || data.leaderboard.length === 0) {
+        loadingEl.textContent = 'Hali hech kim ball to\'plamagan. Birinchi bo\'ling! 🚀';
+        return;
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      contentEl.innerHTML = data.leaderboard.map((u, i) => {
+        const name = u.username ? '@' + u.username : (u.first_name || 'Foydalanuvchi');
+        const rank = medals[i] || (i + 1);
+        const meClass = u.is_me ? ' me' : '';
+        return '<div class="lb-row' + meClass + '"><span class="lb-rank">' + rank + '</span>' +
+          '<span class="lb-name">' + escapeHtml(name) + '</span>' +
+          '<span class="lb-points">' + u.points + '</span></div>';
+      }).join('');
+      loadingEl.classList.add('hidden');
+      contentEl.classList.remove('hidden');
+    } catch (e) {
+      loadingEl.textContent = 'Yuklab bo\'lmadi. Qayta urinib ko\'ring.';
+    }
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  document.querySelectorAll('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      const target = tab.dataset.tab;
+      document.getElementById('profile-view').classList.toggle('hidden', target !== 'profile');
+      document.getElementById('leaderboard-view').classList.toggle('hidden', target !== 'leaderboard');
+      if (target === 'leaderboard') loadLeaderboard();
+    });
+  });
+
+  loadProfile();
+</script>
+
+</body>
+</html>

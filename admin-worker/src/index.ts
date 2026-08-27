@@ -49,6 +49,7 @@ export interface Env {
   WEBHOOK_SECRET: string; // Telegram secret_token tekshiruvi uchun
   GITHUB_TOKEN: string; // /pause, /resume, /stats, /deadline uchun (repo+workflow huquqi)
   DB: D1Database; // gamifikatsiya: users, quizzes, quiz_answers, settings jadvallari
+  ASSETS: Fetcher; // Mini App statik fayllari (public/)
 }
 
 const POINTS_CORRECT = 10;
@@ -538,6 +539,87 @@ async function getLeaderboard(env: Env, limit = 10) {
   return results;
 }
 
+async function getUserRank(env: Env, userId: number): Promise<number | null> {
+  const row = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM users u2 WHERE u2.points > u1.points) + 1 AS rank
+     FROM users u1 WHERE u1.user_id = ?`
+  )
+    .bind(userId)
+    .first<{ rank: number }>();
+  return row?.rank ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Mini App: Telegram initData tekshiruvi + JSON API
+// ---------------------------------------------------------------------------
+
+async function hmacSha256(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
+  const cryptoKey = await crypto.subtle.importKey("raw", key as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  return crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
+}
+
+function bufToHex(buf: ArrayBuffer): string {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function verifyInitData(
+  initData: string,
+  botToken: string
+): Promise<{ id: number; username?: string; first_name?: string } | null> {
+  if (!initData) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+
+  const sortedKeys = [...params.keys()].sort();
+  const dataCheckString = sortedKeys.map((k) => `${k}=${params.get(k)}`).join("\n");
+
+  const secretKey = await hmacSha256(new TextEncoder().encode("WebAppData"), botToken);
+  const computedHash = bufToHex(await hmacSha256(secretKey, dataCheckString));
+  if (computedHash !== hash) return null;
+
+  const userJson = params.get("user");
+  if (!userJson) return null;
+  try {
+    const user = JSON.parse(userJson);
+    return { id: user.id, username: user.username, first_name: user.first_name };
+  } catch {
+    return null;
+  }
+}
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleApiMe(request: Request, env: Env): Promise<Response> {
+  const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
+  const user = await verifyInitData(initData, env.ADMIN_BOT_TOKEN);
+  if (!user) return jsonResponse({ error: "Avtorizatsiya xato — botni Telegram ichida oching." }, 401);
+
+  const stats = await getUserStats(env, user.id);
+  if (!stats) {
+    return jsonResponse({ points: 0, correct_answers: 0, total_answers: 0, rank: null });
+  }
+  const rank = await getUserRank(env, user.id);
+  return jsonResponse({ ...stats, rank });
+}
+
+async function handleApiLeaderboard(request: Request, env: Env): Promise<Response> {
+  const initData = request.headers.get("X-Telegram-Init-Data") ?? "";
+  const user = await verifyInitData(initData, env.ADMIN_BOT_TOKEN);
+
+  const top = await getLeaderboard(env, 20);
+  const leaderboard = top.map((u) => ({ ...u, is_me: user ? u.user_id === user.id : false }));
+  return jsonResponse({ leaderboard });
+}
+
 function buildQuizMessageHtml(poll: PollData): string {
   const letters = ["A", "B", "C", "D", "E", "F"];
   const optionsHtml = poll.options
@@ -860,8 +942,19 @@ async function handlePostLeaderboardCommand(env: Env, chatId: number, fromId: nu
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Mini App JSON API
+    if (url.pathname === "/api/me") return handleApiMe(request, env);
+    if (url.pathname === "/api/leaderboard") return handleApiLeaderboard(request, env);
+
+    // Mini App statik fayllari (public/index.html va h.k.)
+    if (request.method === "GET") {
+      return env.ASSETS.fetch(request);
+    }
+
     if (request.method !== "POST") {
-      return new Response("OK — bu Telegram webhook endpoint", { status: 200 });
+      return new Response("Method Not Allowed", { status: 405 });
     }
 
     // Telegram'dan kelayotganini tekshirish (setWebhook'da o'rnatilgan secret_token)
