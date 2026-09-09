@@ -9,7 +9,8 @@
  *   /fact                      — hoziroq shaxsiy fakt (hammaga ochiq)
  *   /post_now facts|poll|flex  — kanalga hoziroq post yuborish (admin)
  *   /preview facts|poll|flex   — kanalga YUBORMASDAN, sizga preview (admin)
- *   /deadline YYYY-MM-DD|clear — FLEX aniq muddatini o'rnatish (admin)
+ *   /opendate rasmiy|norasmiy YYYY-MM-DD|clear — FLEX ochilish sanasi (admin)
+ *   /deadline rasmiy|norasmiy YYYY-MM-DD|clear — FLEX yopilish/muddat sanasi (admin)
  *   /pause / /resume           — kunlik avtomatik postlarni to'xtatish/yoqish (admin)
  *   /stats                     — oxirgi postlar holati + pauza holati (admin)
  *   /next                      — keyingi avtomatik post qachon ketishi (admin)
@@ -233,53 +234,118 @@ async function ghRequest(env: Env, method: string, path: string, body?: unknown)
   return ghRequestRepo(env.GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, method, path, body);
 }
 
-// my-harvard-path saytidagi FLEX countdown (flex.html) — /deadline buyrug'i shu yerni ham yangilaydi.
+// ---------------------------------------------------------------------------
+// Flex/countdown — ochilish (open) va yopilish (close) sanalari, har biri
+// "rasmiy" (official=true) yoki "taxminiy" (official=false) holatga ega
+// ---------------------------------------------------------------------------
+
+type DeadlineKey = "open" | "close";
+type DeadlineEntry = { date: string; official: boolean };
+type DeadlineConfig = Partial<Record<DeadlineKey, DeadlineEntry>>;
+
+const DEADLINE_LABELS: Record<DeadlineKey, string> = { open: "Ochilish sanasi", close: "Ariza muddati" };
+
+async function getDeadlineConfig(env: Env): Promise<DeadlineConfig> {
+  try {
+    const file = await ghRequest(env, "GET", "/contents/deadline.json");
+    return JSON.parse(atob((file.content as string).replace(/\n/g, ""))) as DeadlineConfig;
+  } catch {
+    return {};
+  }
+}
+
+async function setDeadlineEntry(env: Env, key: DeadlineKey, entry: DeadlineEntry | null): Promise<void> {
+  const path = "/contents/deadline.json";
+  const existing = await ghRequest(env, "GET", path).catch(() => null);
+  const current: DeadlineConfig = existing ? JSON.parse(atob((existing.content as string).replace(/\n/g, ""))) : {};
+  if (entry) {
+    current[key] = entry;
+  } else {
+    delete current[key];
+  }
+  const body = {
+    message: entry
+      ? `chore: FLEX ${key} sanasini o'rnatish (${entry.date}, ${entry.official ? "rasmiy" : "taxminiy"}) [admin bot]`
+      : `chore: FLEX ${key} sanasini tozalash [admin bot]`,
+    content: btoa(JSON.stringify(current, null, 2) + "\n"),
+    sha: existing?.sha,
+  };
+  await ghRequest(env, "PUT", path, body);
+}
+
+function nextApproxDeadline(): { name: string; daysLeft: number; isoDate: string } {
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+
+  let best: { name: string; daysLeft: number; isoDate: string } | null = null;
+  for (const round of APPROX_ROUNDS) {
+    let target = Date.UTC(today.getUTCFullYear(), round.month - 1, round.day);
+    if (target < todayUtc) {
+      target = Date.UTC(today.getUTCFullYear() + 1, round.month - 1, round.day);
+    }
+    const daysLeft = Math.round((target - todayUtc) / 86400000);
+    if (!best || daysLeft < best.daysLeft) {
+      best = { name: round.name, daysLeft, isoDate: new Date(target).toISOString().slice(0, 10) };
+    }
+  }
+  return best!;
+}
+
+/** Eng yaqin (ochilish yoki yopilish) sanani hisoblaydi — post matni va sayt sync uchun umumiy. */
+async function resolveNextDate(env: Env): Promise<{ name: string; daysLeft: number; isExact: boolean; isoDate: string }> {
+  const config = await getDeadlineConfig(env).catch(() => ({}) as DeadlineConfig);
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+
+  const candidates: { name: string; daysLeft: number; isExact: boolean; isoDate: string }[] = [];
+  for (const key of Object.keys(DEADLINE_LABELS) as DeadlineKey[]) {
+    const entry = config[key];
+    if (!entry?.date) continue;
+    const target = Date.parse(`${entry.date}T00:00:00Z`);
+    if (Number.isNaN(target)) continue;
+    const daysLeft = Math.round((target - todayUtc) / 86400000);
+    if (daysLeft >= 0) {
+      candidates.push({ name: DEADLINE_LABELS[key], daysLeft, isExact: !!entry.official, isoDate: entry.date });
+    }
+  }
+
+  if (candidates.length) {
+    return candidates.reduce((best, c) => (c.daysLeft < best.daysLeft ? c : best));
+  }
+
+  const approx = nextApproxDeadline();
+  return { ...approx, isExact: false };
+}
+
+async function computeDeadline(env: Env): Promise<{ name: string; daysLeft: number; isExact: boolean }> {
+  return resolveNextDate(env);
+}
+
+// my-harvard-path saytidagi FLEX countdown (flex.html) — /deadline va /opendate
+// buyruqlaridan keyin shu funksiya chaqirilib, saytni ham sinxronlaydi.
 // Alohida, shu repo'ga cheklangan GITHUB_TOKEN_MHP token ishlatiladi.
 const MHP_OWNER = "ruzibekov24";
 const MHP_REPO = "my-harvard-path";
 const MHP_FLEX_FILE = "flex.html";
 
-async function syncSiteCountdown(env: Env, isoDate: string | null): Promise<boolean> {
+async function syncSiteCountdown(env: Env): Promise<boolean> {
   try {
+    const next = await resolveNextDate(env);
     const file = await ghRequestRepo(env.GITHUB_TOKEN_MHP, MHP_OWNER, MHP_REPO, "GET", `/contents/${MHP_FLEX_FILE}`);
     const html = new TextDecoder().decode(Uint8Array.from(atob(file.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
-    const value = isoDate ?? "TBD";
-    const updatedHtml = html.replace(/data-deadline="[^"]*"/, `data-deadline="${value}"`);
+    const updatedHtml = html.replace(/data-deadline="[^"]*"/, `data-deadline="${next.isoDate}T23:59:59"`);
     if (updatedHtml === html) return false; // pattern topilmadi — sayt tuzilishi o'zgargan bo'lishi mumkin
 
     const body = {
-      message: `chore: FLEX countdown sync (${value}) [admin bot]`,
+      message: `chore: FLEX countdown sync (${next.isoDate}, ${next.isExact ? "rasmiy" : "taxminiy"}) [admin bot]`,
       content: btoa(String.fromCharCode(...new TextEncoder().encode(updatedHtml))),
       sha: file.sha,
     };
     await ghRequestRepo(env.GITHUB_TOKEN_MHP, MHP_OWNER, MHP_REPO, "PUT", `/contents/${MHP_FLEX_FILE}`, body);
     return true;
   } catch {
-    return false; // token huquqi yo'q yoki boshqa xatolik — asosiy /deadline oqimini buzmaymiz
+    return false; // token huquqi yo'q yoki boshqa xatolik — asosiy buyruq oqimini buzmaymiz
   }
-}
-
-async function getExactDeadline(env: Env): Promise<{ date: string; round: string } | null> {
-  try {
-    const file = await ghRequest(env, "GET", "/contents/deadline.json");
-    const content = JSON.parse(atob((file.content as string).replace(/\n/g, "")));
-    if (content?.date) return { date: content.date, round: content.round ?? "Ariza topshirish" };
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function setDeadline(env: Env, date: string | null, round = "Ariza topshirish"): Promise<void> {
-  const path = "/contents/deadline.json";
-  const existing = await ghRequest(env, "GET", path).catch(() => null);
-  const newContent = date ? { date, round } : {};
-  const body = {
-    message: date ? `chore: FLEX muddatini o'rnatish (${date}) [admin bot]` : "chore: FLEX muddatini tozalash [admin bot]",
-    content: btoa(JSON.stringify(newContent, null, 2) + "\n"),
-    sha: existing?.sha,
-  };
-  await ghRequest(env, "PUT", path, body);
 }
 
 async function getWorkflowState(env: Env): Promise<string> {
@@ -294,43 +360,6 @@ async function setWorkflowEnabled(env: Env, enabled: boolean): Promise<void> {
 async function getRecentRuns(env: Env, perPage = 5): Promise<any[]> {
   const data = await ghRequest(env, "GET", `/actions/workflows/${WORKFLOW_FILE}/runs?per_page=${perPage}`);
   return data.workflow_runs ?? [];
-}
-
-// ---------------------------------------------------------------------------
-// Flex/countdown
-// ---------------------------------------------------------------------------
-
-function nextApproxDeadline(): { name: string; daysLeft: number } {
-  const today = new Date();
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-
-  let best: { name: string; daysLeft: number } | null = null;
-  for (const round of APPROX_ROUNDS) {
-    let target = Date.UTC(today.getUTCFullYear(), round.month - 1, round.day);
-    if (target < todayUtc) {
-      target = Date.UTC(today.getUTCFullYear() + 1, round.month - 1, round.day);
-    }
-    const daysLeft = Math.round((target - todayUtc) / 86400000);
-    if (!best || daysLeft < best.daysLeft) {
-      best = { name: round.name, daysLeft };
-    }
-  }
-  return best!;
-}
-
-async function computeDeadline(env: Env): Promise<{ name: string; daysLeft: number; isExact: boolean }> {
-  const exact = await getExactDeadline(env).catch(() => null);
-  if (exact) {
-    const today = new Date();
-    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-    const target = Date.parse(`${exact.date}T00:00:00Z`);
-    const daysLeft = Math.round((target - todayUtc) / 86400000);
-    if (!Number.isNaN(daysLeft) && daysLeft >= 0) {
-      return { name: `FLEX — ${exact.round}`, daysLeft, isExact: true };
-    }
-  }
-  const approx = nextApproxDeadline();
-  return { ...approx, isExact: false };
 }
 
 function buildFlexPrompt(): string {
@@ -895,8 +924,9 @@ const PUBLIC_COMMANDS_TEXT = `/fact — hoziroq qiziqarli fakt oling
 const ADMIN_COMMANDS_TEXT = `/post_now facts|poll|flex — kanalga hoziroq post yuborish
 /preview facts|poll|flex — kanalga yubormasdan, sizga preview
 /post_leaderboard — TOP 10'ni kanalga post qilish
-/deadline YYYY-MM-DD — FLEX aniq muddatini o'rnatish
-/deadline clear — aniq muddatni bekor qilish (taxminiyga qaytarish)
+/opendate rasmiy|norasmiy YYYY-MM-DD — FLEX ochilish sanasi
+/deadline rasmiy|norasmiy YYYY-MM-DD — FLEX yopilish/muddat sanasi
+/opendate clear yoki /deadline clear — tegishlisini bekor qilish
 /pause — kunlik avtomatik postlarni to'xtatish
 /resume — kunlik avtomatik postlarni qayta yoqish
 /stats — oxirgi postlar holati
@@ -949,37 +979,51 @@ async function handlePreviewCommand(env: Env, chatId: number, fromId: number, ar
   }
 }
 
-async function handleDeadlineCommand(env: Env, chatId: number, fromId: number, args: string[]) {
+async function handleDeadlineArgCommand(
+  env: Env,
+  chatId: number,
+  fromId: number,
+  args: string[],
+  key: DeadlineKey
+) {
   if (!(await requireAdmin(env, chatId, fromId))) return;
 
-  const arg = args[0];
-  if (!arg) {
-    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Foydalanish: /deadline YYYY-MM-DD yoki /deadline clear");
+  const commandName = key === "open" ? "/opendate" : "/deadline";
+  const label = DEADLINE_LABELS[key];
+  const usage = `Foydalanish:\n${commandName} rasmiy YYYY-MM-DD — aniq/tasdiqlangan sana\n${commandName} norasmiy YYYY-MM-DD — taxminiy sana\n${commandName} clear — bekor qilish`;
+
+  const status = args[0];
+  if (!status) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, usage);
     return;
   }
 
   try {
-    if (arg === "clear") {
-      await setDeadline(env, null);
-      const siteSynced = await syncSiteCountdown(env, null);
+    if (status === "clear") {
+      await setDeadlineEntry(env, key, null);
+      const siteSynced = await syncSiteCountdown(env);
       await sendMessage(
         env.ADMIN_BOT_TOKEN,
         chatId,
-        "✅ Aniq muddat bekor qilindi — endi taxminiy sana ishlatiladi." +
+        `✅ ${label} bekor qilindi.` +
           (siteSynced ? "\n🌐 Sayt (my-harvard-path) ham yangilandi." : "\n⚠️ Sayt yangilanmadi (token huquqi yo'q yoki xatolik).")
       );
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
-      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "❌ Sana formati noto'g'ri. Masalan: /deadline 2026-09-15");
+
+    const dateArg = args[1];
+    if ((status !== "rasmiy" && status !== "norasmiy") || !dateArg || !/^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
+      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Format noto'g'ri.\n\n${usage}`);
       return;
     }
-    await setDeadline(env, arg);
-    const siteSynced = await syncSiteCountdown(env, `${arg}T23:59:59`);
+
+    const official = status === "rasmiy";
+    await setDeadlineEntry(env, key, { date: dateArg, official });
+    const siteSynced = await syncSiteCountdown(env);
     await sendMessage(
       env.ADMIN_BOT_TOKEN,
       chatId,
-      `✅ FLEX muddati ${arg} qilib o'rnatildi. Kunlik postlar endi ANIQ countdown ko'rsatadi.` +
+      `✅ ${label}: ${dateArg} (${official ? "RASMIY ✅" : "taxminiy"}) qilib o'rnatildi.` +
         (siteSynced ? "\n🌐 Sayt (my-harvard-path) ham yangilandi." : "\n⚠️ Sayt yangilanmadi (token huquqi yo'q yoki xatolik).")
     );
   } catch (e) {
@@ -1156,7 +1200,9 @@ export default {
       } else if (text.startsWith("/preview")) {
         await handlePreviewCommand(env, chatId, fromId, text.split(/\s+/).slice(1));
       } else if (text.startsWith("/deadline")) {
-        await handleDeadlineCommand(env, chatId, fromId, text.split(/\s+/).slice(1));
+        await handleDeadlineArgCommand(env, chatId, fromId, text.split(/\s+/).slice(1), "close");
+      } else if (text.startsWith("/opendate")) {
+        await handleDeadlineArgCommand(env, chatId, fromId, text.split(/\s+/).slice(1), "open");
       } else if (text === "/pause") {
         await handlePauseCommand(env, chatId, fromId, false);
       } else if (text === "/resume") {

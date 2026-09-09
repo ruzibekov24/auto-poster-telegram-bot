@@ -68,26 +68,21 @@ LOG_FILE = BASE_DIR / "bot.log"
 MAX_RECENT_FACTS = 20
 MAX_GENERATION_ATTEMPTS = 3
 
-# FLEX (Future Leaders Exchange Program) arizasining ANIQ muddati "deadline.json"
-# faylida saqlanadi (admin-worker/Telegram bot /deadline buyrug'i shu faylni yangilaydi).
-# Fayl bo'sh/mavjud bo'lmasa, bot APPROX_ROUNDS asosida TAXMINIY countdown ko'rsatadi.
+# FLEX (Future Leaders Exchange Program) ochilish/yopilish sanalari "deadline.json"
+# faylida saqlanadi (Telegram bot /opendate va /deadline buyruqlari shu faylni yangilaydi).
+# Har bir sana "official": true/false (rasmiy/taxminiy) belgisiga ega bo'ladi.
+# Format: {"open": {"date": "2026-09-12", "official": false}, "close": {...}}
 DEADLINE_FILE = BASE_DIR / "deadline.json"
 
 
-def load_exact_deadlines() -> list[dict]:
+def load_deadline_config() -> dict:
     if not DEADLINE_FILE.exists():
-        return []
+        return {}
     try:
         with open(DEADLINE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            return json.load(f)
     except (json.JSONDecodeError, OSError):
-        return []
-    if not data.get("date"):
-        return []
-    return [{"university": "FLEX", "round": data.get("round", "Ariza topshirish"), "date": data["date"]}]
-
-
-EXACT_DEADLINES: list[dict] = load_exact_deadlines()
+        return {}
 
 # FLEX dasturi arizasi har yili taqriban sentyabr o'rtalarida yopiladi — aniq sana
 # e'lon qilinmaguncha shu taxminiy sana asosida countdown ko'rsatiladi (foydalanuvchi
@@ -286,33 +281,43 @@ def build_post_text(category: str) -> tuple[str, str]:
 # ----------------------------------------------------------------------------
 
 
-def next_deadline() -> tuple[str, int, bool]:
-    """Eng yaqin ariza muddatini qaytaradi: (nom, qolgan_kun, aniqmi).
+DEADLINE_LABELS = {"open": "Ochilish sanasi", "close": "Ariza muddati"}
 
-    EXACT_DEADLINES ro'yxati to'ldirilgan bo'lsa — o'sha aniq sanalardan eng
-    yaqinini ishlatadi. Bo'sh bo'lsa — APPROX_ROUNDS asosida taxminiy (har
-    yili taqriban takrorlanadigan) muddatni hisoblaydi.
+
+def next_deadline() -> tuple[str, int, bool]:
+    """Eng yaqin (ochilish yoki yopilish) sanani qaytaradi: (nom, qolgan_kun, rasmiymi).
+
+    deadline.json'da "open"/"close" sanalaridan hozirgi kunga eng yaqin va hali
+    o'tib ketmagani tanlanadi. Ikkalasi ham bo'sh/o'tib ketgan bo'lsa —
+    APPROX_ROUNDS asosida taxminiy (har yili taqriban takrorlanadigan,
+    har doim NORASMIY) muddatga tushiladi.
     """
     today = datetime.now(ZoneInfo(TIMEZONE)).date()
-
-    if EXACT_DEADLINES:
-        upcoming = [
-            (f"{d['university']} — {d['round']}", (date.fromisoformat(d["date"]) - today).days)
-            for d in EXACT_DEADLINES
-        ]
-        upcoming = [u for u in upcoming if u[1] >= 0]
-        if upcoming:
-            name, days_left = min(upcoming, key=lambda u: u[1])
-            return name, days_left, True
+    config = load_deadline_config()
 
     candidates = []
+    for key, label in DEADLINE_LABELS.items():
+        entry = config.get(key)
+        if not entry or not entry.get("date"):
+            continue
+        try:
+            target = date.fromisoformat(entry["date"])
+        except ValueError:
+            continue
+        days_left = (target - today).days
+        if days_left >= 0:
+            candidates.append((label, days_left, bool(entry.get("official"))))
+
+    if candidates:
+        return min(candidates, key=lambda c: c[1])
+
+    approx_candidates = []
     for round_info in APPROX_ROUNDS:
         target = date(today.year, round_info["month"], round_info["day"])
         if target < today:
             target = date(today.year + 1, round_info["month"], round_info["day"])
-        candidates.append((round_info["name"], (target - today).days))
-    name, days_left = min(candidates, key=lambda c: c[1])
-    return name, days_left, False
+        approx_candidates.append((round_info["name"], (target - today).days, False))
+    return min(approx_candidates, key=lambda c: c[1])
 
 
 FLEX_HOOKS = ["✈️ FLEX countdown:", "⏳ Reality check:", "🔥 FLEX fact:", "🌎 Exchange szn:"]
