@@ -201,8 +201,15 @@ async function generateFact(env: Env, category: string): Promise<{ fact: string;
 // GitHub API — /pause, /resume, /stats, /deadline uchun
 // ---------------------------------------------------------------------------
 
-async function ghRequest(env: Env, method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}${path}`, {
+async function ghRequestRepo(
+  env: Env,
+  owner: string,
+  repo: string,
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<any> {
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${env.GITHUB_TOKEN}`,
@@ -219,6 +226,36 @@ async function ghRequest(env: Env, method: string, path: string, body?: unknown)
     throw new Error(`GitHub API xatoligi (${method} ${path}): ${res.status} ${JSON.stringify(data)}`);
   }
   return data;
+}
+
+async function ghRequest(env: Env, method: string, path: string, body?: unknown): Promise<any> {
+  return ghRequestRepo(env, GITHUB_OWNER, GITHUB_REPO, method, path, body);
+}
+
+// my-harvard-path saytidagi FLEX countdown (flex.html) — /deadline buyrug'i shu yerni ham yangilaydi.
+// GITHUB_TOKEN'ga bu repo huquqi qo'shilmagan bo'lsa, sync jim (xato bermay) o'tkazib yuboriladi.
+const MHP_OWNER = "ruzibekov24";
+const MHP_REPO = "my-harvard-path";
+const MHP_FLEX_FILE = "flex.html";
+
+async function syncSiteCountdown(env: Env, isoDate: string | null): Promise<boolean> {
+  try {
+    const file = await ghRequestRepo(env, MHP_OWNER, MHP_REPO, "GET", `/contents/${MHP_FLEX_FILE}`);
+    const html = new TextDecoder().decode(Uint8Array.from(atob(file.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
+    const value = isoDate ?? "TBD";
+    const updatedHtml = html.replace(/data-deadline="[^"]*"/, `data-deadline="${value}"`);
+    if (updatedHtml === html) return false; // pattern topilmadi — sayt tuzilishi o'zgargan bo'lishi mumkin
+
+    const body = {
+      message: `chore: FLEX countdown sync (${value}) [admin bot]`,
+      content: btoa(String.fromCharCode(...new TextEncoder().encode(updatedHtml))),
+      sha: file.sha,
+    };
+    await ghRequestRepo(env, MHP_OWNER, MHP_REPO, "PUT", `/contents/${MHP_FLEX_FILE}`, body);
+    return true;
+  } catch {
+    return false; // token huquqi yo'q yoki boshqa xatolik — asosiy /deadline oqimini buzmaymiz
+  }
 }
 
 async function getExactDeadline(env: Env): Promise<{ date: string; round: string } | null> {
@@ -923,7 +960,13 @@ async function handleDeadlineCommand(env: Env, chatId: number, fromId: number, a
   try {
     if (arg === "clear") {
       await setDeadline(env, null);
-      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "✅ Aniq muddat bekor qilindi — endi taxminiy sana ishlatiladi.");
+      const siteSynced = await syncSiteCountdown(env, null);
+      await sendMessage(
+        env.ADMIN_BOT_TOKEN,
+        chatId,
+        "✅ Aniq muddat bekor qilindi — endi taxminiy sana ishlatiladi." +
+          (siteSynced ? "\n🌐 Sayt (my-harvard-path) ham yangilandi." : "\n⚠️ Sayt yangilanmadi (token huquqi yo'q yoki xatolik).")
+      );
       return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
@@ -931,7 +974,13 @@ async function handleDeadlineCommand(env: Env, chatId: number, fromId: number, a
       return;
     }
     await setDeadline(env, arg);
-    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `✅ FLEX muddati ${arg} qilib o'rnatildi. Kunlik postlar endi ANIQ countdown ko'rsatadi.`);
+    const siteSynced = await syncSiteCountdown(env, `${arg}T23:59:59`);
+    await sendMessage(
+      env.ADMIN_BOT_TOKEN,
+      chatId,
+      `✅ FLEX muddati ${arg} qilib o'rnatildi. Kunlik postlar endi ANIQ countdown ko'rsatadi.` +
+        (siteSynced ? "\n🌐 Sayt (my-harvard-path) ham yangilandi." : "\n⚠️ Sayt yangilanmadi (token huquqi yo'q yoki xatolik).")
+    );
   } catch (e) {
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
   }
