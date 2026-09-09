@@ -328,22 +328,36 @@ const MHP_OWNER = "ruzibekov24";
 const MHP_REPO = "my-harvard-path";
 const MHP_FLEX_FILE = "flex.html";
 
+/** Katta fayllarda "Maximum call stack size exceeded" bo'lmasligi uchun bo'lib-bo'lib kodlaydi. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000; // 32768
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function syncSiteCountdown(env: Env): Promise<boolean> {
   try {
     const next = await resolveNextDate(env);
     const file = await ghRequestRepo(env.GITHUB_TOKEN_MHP, MHP_OWNER, MHP_REPO, "GET", `/contents/${MHP_FLEX_FILE}`);
     const html = new TextDecoder().decode(Uint8Array.from(atob(file.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
     const updatedHtml = html.replace(/data-deadline="[^"]*"/, `data-deadline="${next.isoDate}T23:59:59"`);
-    if (updatedHtml === html) return false; // pattern topilmadi — sayt tuzilishi o'zgargan bo'lishi mumkin
+    if (updatedHtml === html) {
+      console.error("syncSiteCountdown: data-deadline pattern topilmadi");
+      return false; // pattern topilmadi — sayt tuzilishi o'zgargan bo'lishi mumkin
+    }
 
     const body = {
       message: `chore: FLEX countdown sync (${next.isoDate}, ${next.isExact ? "rasmiy" : "taxminiy"}) [admin bot]`,
-      content: btoa(String.fromCharCode(...new TextEncoder().encode(updatedHtml))),
+      content: bytesToBase64(new TextEncoder().encode(updatedHtml)),
       sha: file.sha,
     };
     await ghRequestRepo(env.GITHUB_TOKEN_MHP, MHP_OWNER, MHP_REPO, "PUT", `/contents/${MHP_FLEX_FILE}`, body);
     return true;
-  } catch {
+  } catch (e) {
+    console.error("syncSiteCountdown xatoligi:", (e as Error).message);
     return false; // token huquqi yo'q yoki boshqa xatolik — asosiy buyruq oqimini buzmaymiz
   }
 }
