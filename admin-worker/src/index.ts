@@ -48,6 +48,7 @@ export interface Env {
   ADMIN_CHAT_ID: string; // faqat shu Telegram user_id admin buyruqlarini ishlata oladi
   WEBHOOK_SECRET: string; // Telegram secret_token tekshiruvi uchun
   GITHUB_TOKEN: string; // /pause, /resume, /stats, /deadline uchun (repo+workflow huquqi)
+  GITHUB_TOKEN_MHP: string; // my-harvard-path repo'ga alohida cheklangan token (flex.html sync uchun)
   DB: D1Database; // gamifikatsiya: users, quizzes, quiz_answers, settings jadvallari
   ASSETS: Fetcher; // Mini App statik fayllari (public/)
 }
@@ -202,7 +203,7 @@ async function generateFact(env: Env, category: string): Promise<{ fact: string;
 // ---------------------------------------------------------------------------
 
 async function ghRequestRepo(
-  env: Env,
+  token: string,
   owner: string,
   repo: string,
   method: string,
@@ -212,7 +213,7 @@ async function ghRequestRepo(
   const res = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
       "User-Agent": "harvard-path-admin-bot",
       "Content-Type": "application/json",
@@ -229,18 +230,18 @@ async function ghRequestRepo(
 }
 
 async function ghRequest(env: Env, method: string, path: string, body?: unknown): Promise<any> {
-  return ghRequestRepo(env, GITHUB_OWNER, GITHUB_REPO, method, path, body);
+  return ghRequestRepo(env.GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, method, path, body);
 }
 
 // my-harvard-path saytidagi FLEX countdown (flex.html) — /deadline buyrug'i shu yerni ham yangilaydi.
-// GITHUB_TOKEN'ga bu repo huquqi qo'shilmagan bo'lsa, sync jim (xato bermay) o'tkazib yuboriladi.
+// Alohida, shu repo'ga cheklangan GITHUB_TOKEN_MHP token ishlatiladi.
 const MHP_OWNER = "ruzibekov24";
 const MHP_REPO = "my-harvard-path";
 const MHP_FLEX_FILE = "flex.html";
 
 async function syncSiteCountdown(env: Env, isoDate: string | null): Promise<boolean> {
   try {
-    const file = await ghRequestRepo(env, MHP_OWNER, MHP_REPO, "GET", `/contents/${MHP_FLEX_FILE}`);
+    const file = await ghRequestRepo(env.GITHUB_TOKEN_MHP, MHP_OWNER, MHP_REPO, "GET", `/contents/${MHP_FLEX_FILE}`);
     const html = new TextDecoder().decode(Uint8Array.from(atob(file.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
     const value = isoDate ?? "TBD";
     const updatedHtml = html.replace(/data-deadline="[^"]*"/, `data-deadline="${value}"`);
@@ -251,7 +252,7 @@ async function syncSiteCountdown(env: Env, isoDate: string | null): Promise<bool
       content: btoa(String.fromCharCode(...new TextEncoder().encode(updatedHtml))),
       sha: file.sha,
     };
-    await ghRequestRepo(env, MHP_OWNER, MHP_REPO, "PUT", `/contents/${MHP_FLEX_FILE}`, body);
+    await ghRequestRepo(env.GITHUB_TOKEN_MHP, MHP_OWNER, MHP_REPO, "PUT", `/contents/${MHP_FLEX_FILE}`, body);
     return true;
   } catch {
     return false; // token huquqi yo'q yoki boshqa xatolik — asosiy /deadline oqimini buzmaymiz
