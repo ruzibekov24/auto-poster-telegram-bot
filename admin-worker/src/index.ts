@@ -738,10 +738,18 @@ async function verifyInitData(
   }
 }
 
+// my-harvard-path.pages.dev saytidan (boshqa domen) ochiq ma'lumotlarni (leaderboard)
+// o'qiy olishi uchun CORS ruxsati — faqat public/o'qish endpointlari uchun
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
 }
 
@@ -1163,6 +1171,11 @@ async function handlePostLeaderboardCommand(env: Env, chatId: number, fromId: nu
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // CORS preflight (my-harvard-path.pages.dev saytidan so'rovlar uchun)
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
 
     // Mini App JSON API
     if (url.pathname === "/api/me") return handleApiMe(request, env);
