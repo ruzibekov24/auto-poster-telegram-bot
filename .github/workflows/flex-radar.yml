@@ -1,0 +1,38 @@
+name: FLEX Radar
+
+on:
+  schedule:
+    # Har 30 daqiqada
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # state/ papkasini commit qilib qaytarish uchun
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r flex-radar/requirements.txt
+
+      - name: FLEX Radar'ni ishga tushirish
+        working-directory: flex-radar
+        run: python main.py
+        env:
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: state/ papkasini repoga qaytarish
+        run: |
+          git config user.name "flex-radar-bot"
+          git config user.email "flex-radar-bot@users.noreply.github.com"
+          git add flex-radar/state
+          git diff --cached --quiet || git commit -m "chore: update FLEX Radar state [skip ci]"
+          git push

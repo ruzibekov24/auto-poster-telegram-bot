@@ -35,7 +35,7 @@ interface TelegramUpdate {
     id: string;
     data?: string;
     from: { id: number; username?: string; first_name?: string };
-    message?: { message_id: number; chat: { id: number } };
+    message?: { message_id: number; chat: { id: number }; text?: string };
   };
 }
 
@@ -62,6 +62,9 @@ const WORKFLOW_FILE = "post.yml";
 
 // main.py'dagi ADMIN_BOT_USERNAME bilan qo'lda sinxronlab turing
 const ADMIN_BOT_USERNAME = "@MHP_adminbot";
+
+// flex-radar/notify/telegram_notifier.py'dagi SEPARATOR bilan qo'lda sinxronlab turing
+const FLEX_RADAR_SEPARATOR = "─".repeat(8);
 
 // post.yml'dagi cron jadvali bilan qo'lda sinxronlab turing (UTC soatlari)
 const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
@@ -482,8 +485,56 @@ async function answerCallbackQuery(env: Env, callbackQueryId: string, text: stri
   }).catch(() => {});
 }
 
+async function removeInlineKeyboard(env: Env, chatId: number, messageId: number) {
+  await tgCall(env.ADMIN_BOT_TOKEN, "editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [] },
+  }).catch(() => {});
+}
+
+/**
+ * FLEX Radar (flex-radar/main.py) yuborgan alert xabaridagi "✅ Ha" / "❌ Yo'q"
+ * tugmasi bosilganda ishlaydi. Xabar matni FLEX_RADAR_SEPARATOR bo'yicha ikkiga
+ * bo'linadi: birinchi qism — kanalga postlash uchun tayyor matn, ikkinchi qism —
+ * faqat adminga ko'rinadigan ishonch/manba ma'lumoti.
+ */
+async function handleFlexRadarDecision(env: Env, cq: NonNullable<TelegramUpdate["callback_query"]>) {
+  const message = cq.message!;
+  await removeInlineKeyboard(env, message.chat.id, message.message_id);
+
+  if (cq.data === "flexradar:no") {
+    await answerCallbackQuery(env, cq.id, "Bekor qilindi.");
+    return;
+  }
+
+  const fullText = message.text ?? "";
+  const channelPost = fullText.split(FLEX_RADAR_SEPARATOR)[0].trim();
+  if (!channelPost) {
+    await answerCallbackQuery(env, cq.id, "❌ Xabar matni topilmadi.", true);
+    return;
+  }
+
+  try {
+    await sendMessage(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, channelPost);
+    await answerCallbackQuery(env, cq.id, "✅ Kanalga yuborildi!", true);
+  } catch (e) {
+    await answerCallbackQuery(env, cq.id, `❌ Xatolik: ${(e as Error).message}`, true);
+  }
+}
+
 async function handleCallbackQuery(env: Env, cq: NonNullable<TelegramUpdate["callback_query"]>) {
-  if (!cq.data?.startsWith("qz:") || !cq.message) {
+  if (!cq.message) {
+    await answerCallbackQuery(env, cq.id, "");
+    return;
+  }
+
+  if (cq.data === "flexradar:yes" || cq.data === "flexradar:no") {
+    await handleFlexRadarDecision(env, cq);
+    return;
+  }
+
+  if (!cq.data?.startsWith("qz:")) {
     await answerCallbackQuery(env, cq.id, "");
     return;
   }

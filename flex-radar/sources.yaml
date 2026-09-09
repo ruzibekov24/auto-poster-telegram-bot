@@ -1,0 +1,39 @@
+# FLEX (Future Leaders Exchange Program, O'zbekiston) uchun RASMIY manbalar
+# whitelist'i. Faqat shu yerda ro'yxatdagi manbalar kuzatiladi.
+#
+# Yangi manba qo'shishdan oldin uni QO'LDA tekshiring — soxta/taqlid
+# hisoblarga aldanmaslik uchun.
+
+sources:
+  - id: ac_uzbekistan
+    name: "American Councils Uzbekistan — FLEX sahifasi"
+    url: "https://uzbekistan.americancouncils.org/flex-en"
+    type: web
+    enabled: true
+
+  - id: discoverflex
+    name: "DiscoverFLEX — rasmiy ariza portali"
+    url: "https://www.discoverflex.org/apply-to-flex"
+    type: web
+    enabled: true
+
+  - id: us_embassy
+    name: "AQSh elchixonasi Toshkent — FLEX sahifasi"
+    url: "https://uz.usembassy.gov/flex/"
+    type: web
+    enabled: true
+
+  - id: ac_global
+    name: "American Councils — global FLEX dastur sahifasi"
+    url: "https://www.americancouncils.org/programs/future-leaders-exchange-flex-program"
+    type: web
+    enabled: true
+
+  # Ixtiyoriy, past-ishonchli qo'shimcha signal — Instagram HTML strukturasi
+  # istalgan payt o'zgarishi va bu manba ishlamay qolishi mumkin (bu normal,
+  # tizim buzilmaydi, faqat shu manba o'tkazib yuboriladi).
+  - id: instagram_flex_uz
+    name: "Instagram — @flex_program_uz (tasdiqlanmagan, ixtiyoriy)"
+    url: "https://www.instagram.com/flex_program_uz/"
+    type: instagram
+    enabled: true
