@@ -164,6 +164,15 @@ EMOJI_BAN_NOTE = (
     "variantlardan tanlab, bir xilini qayta-qayta ishlatma)."
 )
 
+# Postning pastida statik footer ("Ball to'plash... @MHP_adminbot") allaqachon bor —
+# AI matn ichida yana botni reklama qilib, takrorlashi kerak emas
+NO_CTA_NOTE = (
+    "MUHIM: matn ichida botga/kanalga o'tishga chaqiruvchi jumlalar YOZMA — masalan "
+    "\"botda mashq qiling\", \"botga o'ting\", \"quyidagi tugmani bosing\", \"@bot orqali "
+    "ko'proq bilib oling\" kabi. Bu allaqachon postning pastida alohida qo'shiladi, "
+    "matn ichida takrorlash shart emas. Faqat fakt/savol mazmuniga e'tibor qarat."
+)
+
 # Gemini API vaqtinchalik band bo'lib qolsa (503 kabi) qayta urinish sozlamalari
 API_RETRY_ATTEMPTS = 4
 API_RETRY_BASE_DELAY = 3  # soniya, har urinishda ko'payadi: 3s, 6s, 9s...
@@ -216,6 +225,8 @@ Ikkita qism yoz (ingliz tilida):
    uslubda). Bu qator Telegram'da spoiler (blur) ostida yashirinadi.
 
 {EMOJI_BAN_NOTE}
+
+{NO_CTA_NOTE}
 
 Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
 <FAKT matni>
@@ -337,6 +348,8 @@ Ikkita qism yoz (ingliz tilida):
 
 {EMOJI_BAN_NOTE}
 
+{NO_CTA_NOTE}
+
 Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
 <MINI-FAKT matni>
 {SPLIT_MARKER}
@@ -441,6 +454,8 @@ Talablar:
 - Savol va variantlar qiziqarli, jiddiy/akademik bo'lmagan ohangda.
 
 {EMOJI_BAN_NOTE}
+
+{NO_CTA_NOTE}
 
 Javobni FAQAT quyidagi JSON formatida qaytar, boshqa hech qanday matn yozma:
 {schema_note}{avoid_block}"""

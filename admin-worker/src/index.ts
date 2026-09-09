@@ -83,6 +83,13 @@ const EMOJI_BAN_NOTE =
   "foydalan (masalan 😭 🤯 😂 🔥 ✨ 👀 🚀 🥲 kabi xilma-xil variantlardan tanlab, " +
   "bir xilini qayta-qayta ishlatma).";
 
+// main.py'dagi NO_CTA_NOTE bilan qo'lda sinxronlab turing
+const NO_CTA_NOTE =
+  "MUHIM: matn ichida botga/kanalga o'tishga chaqiruvchi jumlalar YOZMA — masalan " +
+  '"botda mashq qiling", "botga o\'ting", "quyidagi tugmani bosing", "@bot orqali ' +
+  'ko\'proq bilib oling" kabi. Bu allaqachon postning pastida alohida qo\'shiladi, ' +
+  "matn ichida takrorlash shart emas. Faqat fakt/savol mazmuniga e'tibor qarat.";
+
 const CATEGORY_EMOJI: Record<string, string> = {
   "Crazy facts (fizika, koinot, inson tanasi, hayvonot dunyosi haqida hayratlanarli faktlar)": "🤯",
   "Fun facts (kulgili, kutilmagan statistikalar)": "😂",
@@ -172,6 +179,8 @@ Ikkita qism yoz (ingliz tilida):
    hazil-mutoyibali, emoji bilan boyitilgan jumla. Bu qator Telegram'da spoiler ostida yashiriladi.
 
 ${EMOJI_BAN_NOTE}
+
+${NO_CTA_NOTE}
 
 Javobni FAQAT quyidagi formatda qaytar, boshqa hech qanday izoh yoki sarlavha yozma:
 <FAKT matni>
@@ -303,6 +312,8 @@ Ikkita qism yoz (ingliz tilida):
 
 ${EMOJI_BAN_NOTE}
 
+${NO_CTA_NOTE}
+
 Javobni FAQAT quyidagi formatda qaytar:
 <MINI-FAKT matni>
 ${SPLIT_MARKER}
@@ -372,6 +383,8 @@ Mavzu: ${topic}
 Talablar: 3-4 ta qisqa javob varianti (har biri max 80 belgi), qiziqarli/hazil ohangda.
 
 ${EMOJI_BAN_NOTE}
+
+${NO_CTA_NOTE}
 
 Javobni FAQAT quyidagi JSON formatida qaytar:
 ${schema}`;
