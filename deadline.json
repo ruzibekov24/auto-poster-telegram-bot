@@ -2,5 +2,9 @@
   "open": {
     "date": "2026-10-05",
     "official": true
+  },
+  "close": {
+    "date": "2026-10-10",
+    "official": true
   }
 }
