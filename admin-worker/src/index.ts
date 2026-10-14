@@ -72,7 +72,7 @@ const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
   { hourUtc: 15, type: "flex", label: "✈️ FLEX countdown" },
 ];
 
-const GEMINI_MODEL = "gemini-3.6-flash";
+const GEMINI_MODEL = "gemini-3.8-flash";
 const SPLIT_MARKER = "|||";
 
 // main.py'dagi EMOJI_BAN_NOTE bilan qo'lda sinxronlab turing
@@ -129,7 +129,7 @@ function applyBoldMarkup(text: string): string {
 // ---------------------------------------------------------------------------
 
 // Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tamiz
-const GEMINI_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"];
+const GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash"];
 
 async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<string> {
   const body: Record<string, unknown> = {
@@ -139,31 +139,38 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
     body.generationConfig = { responseMimeType: "application/json" };
   }
 
-  const attemptsPerModel = 3;
+  // Band modelda kutib o'tirmaymiz — darrov keyingisiga o'tamiz. Hammasi band bo'lsa,
+  // qisqa pauzadan so'ng yana bir aylanish (umumiy byudjet ~22s, Worker waitUntil limiti 30s).
+  const deadline = Date.now() + 22000;
   const errors: string[] = [];
-  for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS]) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
-    for (let attempt = 1; attempt <= attemptsPerModel; attempt++) {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as any;
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (typeof text === "string") return text.trim();
-        throw new Error("Gemini javobida matn topilmadi");
-      }
-      errors.push(`${model}: ${res.status} ${(await res.text()).slice(0, 120).replace(/\s+/g, " ")}`);
-      const retryable = res.status === 429 || res.status >= 500;
-      if (!retryable) break; // masalan 404 (model yo'q) — shu modelni qayta urinmasdan keyingisiga
-      if (attempt < attemptsPerModel) {
-        await new Promise((r) => setTimeout(r, 2000 * attempt)); // 2s, 4s
+  const dead = new Set<string>(); // 404 — bu model endi yo'q, qayta urinmaymiz
+  for (let pass = 1; pass <= 2; pass++) {
+    for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS]) {
+      if (dead.has(model) || Date.now() > deadline) continue;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (typeof text === "string") return text.trim();
+          errors.push(`${model}: javobda matn yo'q`);
+          continue;
+        }
+        errors.push(`${model}: ${res.status} ${(await res.text()).slice(0, 100).replace(/\s+/g, " ")}`);
+        if (res.status !== 429 && res.status < 500) dead.add(model);
+      } catch (e) {
+        errors.push(`${model}: ${(e as Error).name === "TimeoutError" ? "timeout" : (e as Error).message}`);
       }
     }
+    if (pass === 1 && Date.now() < deadline - 5000) await new Promise((r) => setTimeout(r, 2500));
   }
-  throw new Error(`Gemini API xatoligi — ${errors.join(" | ")}`);
+  throw new Error(`Gemini API xatoligi — ${errors.slice(-3).join(" | ")}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1370,6 +1377,7 @@ async function generateImage(env: Env, prompt: string): Promise<{ data: string; 
         contents: [{ parts: [{ text: `${prompt}. Flat editorial illustration style, no text or letters in the image.` }] }],
         generationConfig: { responseModalities: ["IMAGE"] },
       }),
+      signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as any;
@@ -1580,7 +1588,7 @@ async function handlePreviewPublish(env: Env, cq: NonNullable<TelegramUpdate["ca
 // ---------------------------------------------------------------------------
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // CORS preflight (my-harvard-path.pages.dev saytidan so'rovlar uchun)
@@ -1636,6 +1644,9 @@ export default {
     const chatId = message.chat.id;
     const fromId = message.from.id;
 
+    // Buyruq (Gemini, rasm) sekin bo'lishi mumkin: Telegram javob kechiksa xabarni QAYTA yuboradi
+    // (preview ikki marta chiqib qolardi). Shu sabab darrov "OK" qaytarib, ishni fonda bajaramiz.
+    const runCommand = async () => {
     try {
       if (text === "/fact" || text === "/fact@" || text.startsWith("/fact ")) {
         await handleFactCommand(env, chatId);
@@ -1670,6 +1681,8 @@ export default {
       // Xatolikni foydalanuvchiga ko'rsatamiz, lekin Worker'ni yiqitmaymiz
       await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`).catch(() => {});
     }
+    };
+    ctx.waitUntil(runCommand());
 
     return new Response("OK");
   },
