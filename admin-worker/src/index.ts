@@ -147,11 +147,12 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
   // Band modelda kutib o'tirmaymiz — darrov keyingisiga o'tamiz. Hammasi band bo'lsa,
   // qisqa pauzadan so'ng yana bir aylanish. 3.8 kabi "o'ylaydigan" model 10s+ olishi mumkin.
   const deadline = invocationDeadline ?? Date.now() + 60000;
+  const geminiUntil = deadline - 10000; // oxirgi zaxira (Workers AI) uchun vaqt qoldiramiz
   const errors: string[] = [];
   const dead = new Set<string>(); // 404 — bu model endi yo'q, qayta urinmaymiz
   for (let pass = 1; pass <= 2; pass++) {
     for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS]) {
-      const remaining = deadline - Date.now();
+      const remaining = geminiUntil - Date.now();
       if (dead.has(model) || remaining < 3000) continue;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
       try {
@@ -159,7 +160,7 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(Math.min(25000, remaining - 500)),
+          signal: AbortSignal.timeout(Math.min(12000, remaining - 500)),
         });
         if (res.ok) {
           const data = (await res.json()) as any;
@@ -174,9 +175,35 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
         errors.push(`${model}: ${(e as Error).name === "TimeoutError" ? "timeout" : (e as Error).message}`);
       }
     }
-    if (pass === 1 && deadline - Date.now() > 8000) await new Promise((r) => setTimeout(r, 2500));
+    if (pass === 1 && geminiUntil - Date.now() > 8000) await new Promise((r) => setTimeout(r, 2500));
   }
-  throw new Error(`Gemini API xatoligi — ${errors.slice(-3).join(" | ")}`);
+
+  // Gemini butunlay band — oxirgi zaxira: Cloudflare Workers AI (o'zbekchasi Gemini'dan zaifroq)
+  try {
+    return await callWorkersAiText(env, prompt, jsonMode);
+  } catch (e) {
+    errors.push(`workers-ai: ${(e as Error).message}`);
+  }
+  throw new Error(`AI xatoligi — ${errors.slice(-4).join(" | ")}`);
+}
+
+async function callWorkersAiText(env: Env, prompt: string, jsonMode: boolean): Promise<string> {
+  const content = jsonMode
+    ? `${prompt}\n\nFaqat bitta to'g'ri JSON obyekt qaytar, boshqa hech narsa yozma.`
+    : prompt;
+  const out = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
+    messages: [{ role: "user", content }],
+    max_tokens: 1200,
+  });
+  const text = typeof out?.response === "string" ? out.response : JSON.stringify(out?.response ?? "");
+  if (!jsonMode) {
+    if (!text.trim()) throw new Error("bo'sh javob");
+    return text.trim();
+  }
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("JSON topilmadi");
+  JSON.parse(match[0]); // yaroqsiz bo'lsa shu yerda xato beradi
+  return match[0];
 }
 
 // ---------------------------------------------------------------------------
