@@ -68,8 +68,7 @@ const FLEX_RADAR_SEPARATOR = "─".repeat(8);
 // post.yml'dagi cron jadvali bilan qo'lda sinxronlab turing (UTC soatlari)
 const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
   { hourUtc: 4, type: "facts", label: "🧠 Fact post" },
-  { hourUtc: 7, type: "special", label: "🎲 Kunlik maxsus post (myth/essay/story/...)" },
-  { hourUtc: 9, type: "poll", label: "🗳 Poll/Viktorina" },
+  { hourUtc: 9, type: "poll", label: "🗳 Poll/Viktorina + kunlik maxsus post (myth/essay/story/...)" },
   { hourUtc: 15, type: "flex", label: "✈️ FLEX countdown" },
 ];
 
@@ -1185,7 +1184,7 @@ async function handlePostLeaderboardCommand(env: Env, chatId: number, fromId: nu
 }
 
 // ---------------------------------------------------------------------------
-// Haftalik maxsus postlar (kuniga 12:00 Toshkent) — fakt/flex/poll'dan tashqari
+// Haftalik maxsus postlar (poll bilan birga, 14:00 Toshkent) — fakt/flex/poll'dan tashqari
 // xilma-xil formatlar. Mavzu FLEX va Ivy League/top akademiyalar orasida aralashadi.
 // Yakshanba: campus rasmi + haftalik leaderboard.
 // ---------------------------------------------------------------------------
@@ -1194,7 +1193,6 @@ type SpecialKind = "myth" | "essay" | "story" | "thisorthat" | "word" | "faq" | 
 const SPECIAL_KINDS: SpecialKind[] = ["myth", "essay", "story", "thisorthat", "word", "faq", "campus"];
 // getUTCDay(): 0=Yakshanba ... 6=Shanba
 const WEEKDAY_SPECIAL: SpecialKind[] = ["campus", "myth", "essay", "story", "thisorthat", "word", "faq"];
-const SPECIAL_HOUR_UTC = 7; // 07:00 UTC = 12:00 Toshkent (cron "0 7,9 * * *" — bitta trigger ikki soatga)
 
 const SPECIAL_TRACKS = [
   "FLEX (Future Leaders Exchange Program — AQSh davlat dasturi, O'zbekiston maktab o'quvchilari uchun bir yillik bepul almashinuv)",
@@ -1531,13 +1529,12 @@ export default {
     return new Response("OK");
   },
 
-  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const paused = await getSetting(env, "paused");
     if (paused === "true") return;
-    if (new Date(event.scheduledTime).getUTCHours() === SPECIAL_HOUR_UTC) {
-      await postWeeklySpecial(env);
-      return;
-    }
+    // Cloudflare Free rejasida akkauntga 5 ta cron limiti bor — shu sabab bitta trigger
+    // ichida avval poll/viktorina, so'ng kunning maxsus posti yuboriladi.
     await postDailyPollOrQuiz(env);
+    await postWeeklySpecial(env).catch(() => {});
   },
 };
