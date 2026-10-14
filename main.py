@@ -46,6 +46,10 @@ CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", CHANNEL_ID or "@MyHarvardPath")
 # o'z Telegram chat ID'ingizni kiriting (@userinfobot orqali bilib olish mumkin)
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
+# Admin-worker manzili: admin /post_now yoki preview tugmasi orqali postni bugun qo'lda
+# joylagan bo'lsa, GitHub Actions'dagi avtomatik post shu orqali bilib, o'tkazib yuboradi
+WORKER_URL = os.getenv("WORKER_URL", "https://harvard-path-admin-bot.ilyosbek41624.workers.dev")
+
 # Ixtiyoriy: healthchecks.io (yoki shunga o'xshash) monitoring URL — jarayon o'zi
 # ishdan chiqsa (masalan server o'chib qolsa) ham SIZGA alohida ogohlantirish keladi
 HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL")
@@ -528,6 +532,20 @@ async def notify_admin(bot: Bot, text: str, parse_mode: str | None = None) -> No
         logger.warning("Adminga xabar yuborib bo'lmadi: %s", e)
 
 
+def posted_manually_today(kind: str) -> bool:
+    """Faqat jadval bo'yicha (GitHub Actions 'schedule') ishga tushganda: bugun shu post
+    admin tomonidan qo'lda joylanganmi? Xatolikda False (ya'ni post odatdagidek ketadi)."""
+    if os.getenv("GITHUB_EVENT_NAME") != "schedule":
+        return False
+    try:
+        resp = httpx.get(f"{WORKER_URL}/api/manual-posted", params={"kind": kind}, timeout=10)
+        resp.raise_for_status()
+        return bool(resp.json().get("posted"))
+    except (httpx.HTTPError, ValueError) as e:
+        logger.warning("Qo'lda joylanganlik tekshiruvi ishlamadi (%s) — post odatdagidek ketadi", e)
+        return False
+
+
 def ping_healthcheck(success: bool) -> None:
     """Ixtiyoriy: healthchecks.io kabi xizmatga ping yuboradi (HEALTHCHECK_URL bo'lsa).
 
@@ -552,8 +570,13 @@ def ping_healthcheck(success: bool) -> None:
 
 async def send_fact_post() -> None:
     category = random.choice(CATEGORIES)
-    logger.info("Yangi post tayyorlanmoqda. Kategoriya: %s", category)
     bot = Bot(token=BOT_TOKEN)
+    if posted_manually_today("facts"):
+        logger.info("Bugun fakt posti qo'lda joylangan — avtomatik post o'tkazib yuborildi")
+        await notify_admin(bot, "⏭ Avtomatik 'facts' posti o'tkazib yuborildi — bugun u qo'lda joylangan.")
+        ping_healthcheck(success=True)
+        return
+    logger.info("Yangi post tayyorlanmoqda. Kategoriya: %s", category)
 
     try:
         post_html, plain_fact = build_post_text(category)
@@ -584,8 +607,13 @@ async def send_fact_post() -> None:
 
 
 async def send_flex_countdown_post() -> None:
-    logger.info("Yangi flex/countdown post tayyorlanmoqda.")
     bot = Bot(token=BOT_TOKEN)
+    if posted_manually_today("flex"):
+        logger.info("Bugun flex posti qo'lda joylangan — avtomatik post o'tkazib yuborildi")
+        await notify_admin(bot, "⏭ Avtomatik 'flex' posti o'tkazib yuborildi — bugun u qo'lda joylangan.")
+        ping_healthcheck(success=True)
+        return
+    logger.info("Yangi flex/countdown post tayyorlanmoqda.")
 
     try:
         post_html, plain_fact = build_flex_post_text()

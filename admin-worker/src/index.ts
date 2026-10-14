@@ -510,11 +510,18 @@ async function tgCall(token: string, method: string, payload: Record<string, unk
   return data.result;
 }
 
-async function sendMessage(token: string, chatId: number | string, text: string, html = false) {
+async function sendMessage(
+  token: string,
+  chatId: number | string,
+  text: string,
+  html = false,
+  replyMarkup?: unknown
+) {
   return tgCall(token, "sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: html ? "HTML" : undefined,
+    reply_markup: replyMarkup,
   });
 }
 
@@ -537,7 +544,8 @@ async function sendPoll(
   chatId: number | string,
   poll: PollData,
   pollType: "quiz" | "regular",
-  anonymous = true
+  anonymous = true,
+  replyMarkup?: unknown
 ) {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
@@ -545,6 +553,7 @@ async function sendPoll(
     options: poll.options,
     is_anonymous: anonymous,
     type: pollType,
+    reply_markup: replyMarkup,
   };
   if (pollType === "quiz") {
     payload.correct_option_id = poll.correct_index;
@@ -641,6 +650,11 @@ async function handleCallbackQuery(env: Env, cq: NonNullable<TelegramUpdate["cal
 
   if (cq.data === "flexradar:yes" || cq.data === "flexradar:no") {
     await handleFlexRadarDecision(env, cq);
+    return;
+  }
+
+  if (cq.data?.startsWith("pv:")) {
+    await handlePreviewPublish(env, cq);
     return;
   }
 
@@ -845,8 +859,8 @@ function buildQuizMessageHtml(poll: PollData): string {
   return `🧠 <b>Viktorina!</b>\n\n${escapeHtml(poll.question)}\n\n${optionsHtml}\n\nJavobni pastdagi tugmalardan tanlang 👇`;
 }
 
-async function postGamifiedQuiz(env: Env): Promise<void> {
-  const poll = await generatePoll(env, "quiz");
+async function postGamifiedQuiz(env: Env, existing?: PollData): Promise<void> {
+  const poll = existing ?? (await generatePoll(env, "quiz"));
   const text = buildQuizMessageHtml(poll);
   const letters = ["A", "B", "C", "D", "E", "F"];
   const buttons = poll.options.map((opt, i) => ({
@@ -902,7 +916,7 @@ async function handlePostNowCommand(env: Env, chatId: number, fromId: number, ar
   if (!(await requireAdmin(env, chatId, fromId))) return;
 
   const target = args[0];
-  if (!["facts", "poll", "flex", ...SPECIAL_KINDS].includes(target)) {
+  if (!POST_TARGETS.includes(target)) {
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `Foydalanish: /post_now facts|poll|flex|${SPECIAL_KINDS.join("|")}`);
     return;
   }
@@ -910,20 +924,12 @@ async function handlePostNowCommand(env: Env, chatId: number, fromId: number, ar
   await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `⏳ ${target} tayyorlanmoqda...`);
 
   try {
-    if (target === "facts") {
-      const category = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-      const { fact, reaction } = await generateFact(env, category);
-      const html = buildFactHtmlForChannel(env, category, fact, reaction);
-      await sendMessage(env.BOT_TOKEN, env.CHANNEL_ID, html, true);
-    } else if (target === "flex") {
-      const html = await buildFlexHtml(env);
-      await sendMessage(env.BOT_TOKEN, env.CHANNEL_ID, html, true);
-    } else if ((SPECIAL_KINDS as string[]).includes(target)) {
-      await deliverSpecial(env, env.CHANNEL_ID, await buildSpecial(env, target as SpecialKind));
-    } else {
-      await postDailyPollOrQuiz(env);
-    }
-    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `✅ Kanalga "${target}" post yuborildi.`);
+    await publishRecord(env, await generateRecord(env, target));
+    await sendMessage(
+      env.ADMIN_BOT_TOKEN,
+      chatId,
+      `✅ Kanalga "${target}" post yuborildi. Bugungi avtomatik "${target}" posti o'tkazib yuboriladi.`
+    );
   } catch (e) {
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
   }
@@ -992,29 +998,19 @@ async function handlePreviewCommand(env: Env, chatId: number, fromId: number, ar
   if (!(await requireAdmin(env, chatId, fromId))) return;
 
   const target = args[0];
-  if (!["facts", "poll", "flex", ...SPECIAL_KINDS].includes(target)) {
+  if (!POST_TARGETS.includes(target)) {
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `Foydalanish: /preview facts|poll|flex|${SPECIAL_KINDS.join("|")}`);
     return;
   }
 
-  await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `👀 Preview (kanalga YUBORILMAYDI): ${target}...`);
+  await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `👀 Preview (tugmani bossangiz kanalga joylanadi): ${target}...`);
 
   try {
-    if (target === "facts") {
-      const category = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-      const { fact, reaction } = await generateFact(env, category);
-      const html = buildFactHtmlForChannel(env, category, fact, reaction);
-      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, html, true);
-    } else if (target === "flex") {
-      const html = await buildFlexHtml(env);
-      await sendMessage(env.ADMIN_BOT_TOKEN, chatId, html, true);
-    } else if ((SPECIAL_KINDS as string[]).includes(target)) {
-      await deliverSpecial(env, chatId, await buildSpecial(env, target as SpecialKind));
-    } else {
-      const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
-      const poll = await generatePoll(env, pollType);
-      await sendPoll(env.ADMIN_BOT_TOKEN, chatId, poll, pollType);
-    }
+    const rec = await generateRecord(env, target);
+    const id = crypto.randomUUID().slice(0, 8);
+    const markup = { inline_keyboard: [[{ text: "📣 Kanalga joylash", callback_data: `pv:${id}` }]] };
+    await previewRecord(env, chatId, rec, markup);
+    await setSetting(env, `preview:${id}`, JSON.stringify(rec));
   } catch (e) {
     await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `❌ Xatolik: ${(e as Error).message}`);
   }
@@ -1382,8 +1378,9 @@ async function sendPhotoBytes(
   token: string,
   chatId: number | string,
   image: { data: string; mime: string },
-  caption?: string
-) {
+  caption?: string,
+  replyMarkup?: unknown
+): Promise<any> {
   const bin = atob(image.data);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -1395,28 +1392,51 @@ async function sendPhotoBytes(
     form.append("caption", caption);
     form.append("parse_mode", "HTML");
   }
+  if (replyMarkup) form.append("reply_markup", JSON.stringify(replyMarkup));
   const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
   const out = (await res.json()) as any;
   if (!out.ok) throw new Error(`Telegram API xatoligi (sendPhoto): ${JSON.stringify(out)}`);
+  return out.result;
 }
 
-async function deliverSpecial(env: Env, chatId: number | string, post: SpecialPost): Promise<void> {
+/** Maxsus postni yuboradi. Rasmli postda Telegram file_id qaytaradi — preview'dagi AYNAN shu rasmni
+ * kanalga qayta yuborish uchun (qayta generatsiya qilinmaydi). */
+async function deliverSpecial(
+  env: Env,
+  chatId: number | string,
+  post: SpecialPost,
+  opts: { fileId?: string; textOnly?: boolean; replyMarkup?: unknown } = {}
+): Promise<{ fileId?: string }> {
   const token = env.ADMIN_BOT_TOKEN;
   if (post.type === "poll") {
-    await sendPoll(token, chatId, post.poll, "regular", true);
-  } else if (post.type === "photo") {
-    const image = await generateImage(env, post.imagePrompt);
-    if (!image) {
-      await sendMessage(token, chatId, post.html, true); // rasm chiqmasa — matn bilan davom etamiz
-    } else if (post.html.length <= 1000) {
-      await sendPhotoBytes(token, chatId, image, post.html);
-    } else {
-      await sendPhotoBytes(token, chatId, image);
-      await sendMessage(token, chatId, post.html, true);
-    }
-  } else {
-    await sendMessage(token, chatId, post.html, true);
+    await sendPoll(token, chatId, post.poll, "regular", true, opts.replyMarkup);
+    return {};
   }
+  if (post.type === "text") {
+    await sendMessage(token, chatId, post.html, true, opts.replyMarkup);
+    return {};
+  }
+
+  const image = opts.fileId || opts.textOnly ? null : await generateImage(env, post.imagePrompt);
+  if (!opts.fileId && !image) {
+    await sendMessage(token, chatId, post.html, true, opts.replyMarkup); // rasm chiqmasa — matn bilan davom etamiz
+    return {};
+  }
+
+  const short = post.html.length <= 1000;
+  const caption = short ? post.html : undefined;
+  const markupOnPhoto = short ? opts.replyMarkup : undefined;
+  const msg = opts.fileId
+    ? await tgCall(token, "sendPhoto", {
+        chat_id: chatId,
+        photo: opts.fileId,
+        caption,
+        parse_mode: caption ? "HTML" : undefined,
+        reply_markup: markupOnPhoto,
+      })
+    : await sendPhotoBytes(token, chatId, image!, caption, markupOnPhoto);
+  if (!short) await sendMessage(token, chatId, post.html, true, opts.replyMarkup);
+  return { fileId: msg?.photo?.[msg.photo.length - 1]?.file_id };
 }
 
 async function postWeeklyLeaderboard(env: Env): Promise<void> {
@@ -1429,11 +1449,123 @@ async function postWeeklyLeaderboard(env: Env): Promise<void> {
   );
 }
 
+function tashkentNow(): Date {
+  return new Date(Date.now() + 5 * 3600 * 1000);
+}
+
+function tashkentDate(): string {
+  return tashkentNow().toISOString().slice(0, 10);
+}
+
 async function postWeeklySpecial(env: Env): Promise<void> {
-  const tashkentDay = new Date(Date.now() + 5 * 3600 * 1000).getUTCDay();
-  const kind = WEEKDAY_SPECIAL[tashkentDay];
-  await deliverSpecial(env, env.CHANNEL_ID, await buildSpecial(env, kind));
-  if (tashkentDay === 0) await postWeeklyLeaderboard(env);
+  const weekday = tashkentNow().getUTCDay();
+  const kind = WEEKDAY_SPECIAL[weekday];
+  if (await wasPostedManually(env, kind)) {
+    await notifySkipped(env, kind);
+  } else {
+    await deliverSpecial(env, env.CHANNEL_ID, await buildSpecial(env, kind));
+  }
+  if (weekday === 0) await postWeeklyLeaderboard(env);
+}
+
+// ---------------------------------------------------------------------------
+// Preview -> "Kanalga joylash" tugmasi va qo'lda joylangan postni bugun avtomatik
+// takrorlamaslik. Qo'lda joylash (/post_now yoki tugma) settings jadvaliga
+// "manual:<Toshkent sanasi>:<tur>" yozadi; avtomatik post shu belgini tekshiradi
+// (Worker cron — to'g'ridan-to'g'ri, GitHub Actions'dagi facts/flex — /api/manual-posted orqali).
+// ---------------------------------------------------------------------------
+
+type PreviewRecord =
+  | { kind: "facts"; html: string }
+  | { kind: "flex"; html: string }
+  | { kind: "poll"; pollType: "quiz" | "regular"; poll: PollData }
+  | { kind: SpecialKind; post: SpecialPost; fileId?: string; textOnly?: boolean };
+
+const POST_TARGETS = ["facts", "poll", "flex", ...SPECIAL_KINDS];
+
+async function deleteSetting(env: Env, key: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
+}
+
+async function markManualPost(env: Env, kind: string): Promise<void> {
+  await setSetting(env, `manual:${tashkentDate()}:${kind}`, "1");
+}
+
+async function wasPostedManually(env: Env, kind: string): Promise<boolean> {
+  return (await getSetting(env, `manual:${tashkentDate()}:${kind}`)) === "1";
+}
+
+async function notifySkipped(env: Env, kind: string): Promise<void> {
+  await sendMessage(
+    env.ADMIN_BOT_TOKEN,
+    env.ADMIN_CHAT_ID,
+    `⏭ Avtomatik "${kind}" posti o'tkazib yuborildi — bugun u qo'lda joylangan.`
+  ).catch(() => {});
+}
+
+async function generateRecord(env: Env, target: string): Promise<PreviewRecord> {
+  if (target === "facts") {
+    const category = pickRandom(CATEGORIES);
+    const { fact, reaction } = await generateFact(env, category);
+    return { kind: "facts", html: buildFactHtmlForChannel(env, category, fact, reaction) };
+  }
+  if (target === "flex") return { kind: "flex", html: await buildFlexHtml(env) };
+  if (target === "poll") {
+    const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
+    return { kind: "poll", pollType, poll: await generatePoll(env, pollType) };
+  }
+  return { kind: target as SpecialKind, post: await buildSpecial(env, target as SpecialKind) };
+}
+
+/** Postni adminning o'ziga (tugma bilan) ko'rsatadi. Rasmli postda file_id'ni record'ga yozadi. */
+async function previewRecord(env: Env, chatId: number, rec: PreviewRecord, markup: unknown): Promise<void> {
+  const token = env.ADMIN_BOT_TOKEN;
+  if (rec.kind === "facts" || rec.kind === "flex") {
+    await sendMessage(token, chatId, rec.html, true, markup);
+  } else if (rec.kind === "poll") {
+    await sendPoll(token, chatId, rec.poll, rec.pollType, true, markup);
+  } else {
+    const r = await deliverSpecial(env, chatId, rec.post, { replyMarkup: markup });
+    if (rec.post.type === "photo") {
+      rec.fileId = r.fileId;
+      rec.textOnly = !r.fileId;
+    }
+  }
+}
+
+/** Kanalga joylaydi va bugun uchun "qo'lda joylandi" deb belgilaydi. */
+async function publishRecord(env: Env, rec: PreviewRecord): Promise<void> {
+  if (rec.kind === "facts" || rec.kind === "flex") {
+    await sendMessage(env.BOT_TOKEN, env.CHANNEL_ID, rec.html, true);
+  } else if (rec.kind === "poll") {
+    if (rec.pollType === "quiz") await postGamifiedQuiz(env, rec.poll);
+    else await sendPoll(env.ADMIN_BOT_TOKEN, env.CHANNEL_ID, rec.poll, "regular", true);
+  } else {
+    await deliverSpecial(env, env.CHANNEL_ID, rec.post, { fileId: rec.fileId, textOnly: rec.textOnly });
+  }
+  await markManualPost(env, rec.kind);
+}
+
+async function handlePreviewPublish(env: Env, cq: NonNullable<TelegramUpdate["callback_query"]>) {
+  if (!isAdmin(env, cq.from.id)) {
+    await answerCallbackQuery(env, cq.id, "⛔ Bu tugma faqat admin uchun.", true);
+    return;
+  }
+  const key = `preview:${(cq.data ?? "").slice(3)}`;
+  const raw = await getSetting(env, key);
+  if (!raw) {
+    await answerCallbackQuery(env, cq.id, "Bu preview eskirgan yoki allaqachon joylangan.", true);
+    return;
+  }
+  await deleteSetting(env, key); // ikki marta bosilsa, ikki marta joylanmasin
+  try {
+    await publishRecord(env, JSON.parse(raw) as PreviewRecord);
+    await removeInlineKeyboard(env, cq.message!.chat.id, cq.message!.message_id);
+    await answerCallbackQuery(env, cq.id, "✅ Kanalga joylandi! Bugungi avtomatik post o'tkazib yuboriladi.", true);
+  } catch (e) {
+    await setSetting(env, key, raw); // xatoda qayta urinib ko'rish mumkin bo'lsin
+    await answerCallbackQuery(env, cq.id, `❌ Xatolik: ${(e as Error).message}`, true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,6 +1586,12 @@ export default {
     if (url.pathname === "/api/leaderboard") return handleApiLeaderboard(request, env);
     if (url.pathname === "/api/history") return handleApiHistory(request, env);
     if (url.pathname === "/api/deadline") return handleApiDeadline(request, env);
+    if (url.pathname === "/api/manual-posted") {
+      // main.py (GitHub Actions) avtomatik post oldidan so'raydi: bugun qo'lda joylanganmi?
+      const kind = url.searchParams.get("kind") ?? "";
+      if (!["facts", "flex"].includes(kind)) return jsonResponse({ error: "bad kind" }, 400);
+      return jsonResponse({ posted: await wasPostedManually(env, kind) });
+    }
 
     // Mini App statik fayllari (public/index.html va h.k.)
     if (request.method === "GET") {
@@ -1534,7 +1672,8 @@ export default {
     if (paused === "true") return;
     // Cloudflare Free rejasida akkauntga 5 ta cron limiti bor — shu sabab bitta trigger
     // ichida avval poll/viktorina, so'ng kunning maxsus posti yuboriladi.
-    await postDailyPollOrQuiz(env);
+    if (await wasPostedManually(env, "poll")) await notifySkipped(env, "poll");
+    else await postDailyPollOrQuiz(env);
     await postWeeklySpecial(env).catch(() => {});
   },
 };
