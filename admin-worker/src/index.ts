@@ -1194,7 +1194,7 @@ type SpecialKind = "myth" | "essay" | "story" | "thisorthat" | "word" | "faq" | 
 const SPECIAL_KINDS: SpecialKind[] = ["myth", "essay", "story", "thisorthat", "word", "faq", "campus"];
 // getUTCDay(): 0=Yakshanba ... 6=Shanba
 const WEEKDAY_SPECIAL: SpecialKind[] = ["campus", "myth", "essay", "story", "thisorthat", "word", "faq"];
-const SPECIAL_CRON = "0 7 * * *"; // 07:00 UTC = 12:00 Toshkent
+const SPECIAL_HOUR_UTC = 7; // 07:00 UTC = 12:00 Toshkent (cron "0 7,9 * * *" — bitta trigger ikki soatga)
 
 const SPECIAL_TRACKS = [
   "FLEX (Future Leaders Exchange Program — AQSh davlat dasturi, O'zbekiston maktab o'quvchilari uchun bir yillik bepul almashinuv)",
@@ -1534,7 +1534,7 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const paused = await getSetting(env, "paused");
     if (paused === "true") return;
-    if (event.cron === SPECIAL_CRON) {
+    if (new Date(event.scheduledTime).getUTCHours() === SPECIAL_HOUR_UTC) {
       await postWeeklySpecial(env);
       return;
     }
