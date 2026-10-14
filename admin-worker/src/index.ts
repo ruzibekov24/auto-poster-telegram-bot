@@ -128,8 +128,10 @@ function applyBoldMarkup(text: string): string {
 // Gemini API
 // ---------------------------------------------------------------------------
 
+// Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tamiz
+const GEMINI_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+
 async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
   const body: Record<string, unknown> = {
     contents: [{ parts: [{ text: prompt }] }],
   };
@@ -137,23 +139,28 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
     body.generationConfig = { responseMimeType: "application/json" };
   }
 
-  const maxAttempts = 4;
-  let lastError: string = "";
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as any;
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (typeof text === "string") return text.trim();
-      throw new Error("Gemini javobida matn topilmadi");
-    }
-    lastError = `${res.status} ${await res.text()}`;
-    if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, 1000 * attempt));
+  const attemptsPerModel = 3;
+  let lastError = "";
+  for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS]) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
+    for (let attempt = 1; attempt <= attemptsPerModel; attempt++) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof text === "string") return text.trim();
+        throw new Error("Gemini javobida matn topilmadi");
+      }
+      lastError = `${model}: ${res.status} ${await res.text()}`;
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable) break; // masalan 404 (model yo'q) — shu modelni qayta urinmasdan keyingisiga
+      if (attempt < attemptsPerModel) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt)); // 2s, 4s
+      }
     }
   }
   throw new Error(`Gemini API xatoligi: ${lastError}`);

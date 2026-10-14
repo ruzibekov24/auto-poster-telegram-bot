@@ -55,6 +55,8 @@ WORKER_URL = os.getenv("WORKER_URL", "https://harvard-path-admin-bot.ilyosbek416
 HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL")
 
 GEMINI_MODEL = "gemini-3.6-flash"
+# Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tiladi
+GEMINI_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 TIMEZONE = "Asia/Tashkent"
 POST_TIMES = [(9, 0)]  # (soat, minut) — Toshkent vaqti, har kuni soat 9:00 da fact post
 FLEX_POST_TIME = (20, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 20:00 da flex/countdown post
@@ -169,26 +171,34 @@ NO_CTA_NOTE = (
 )
 
 # Gemini API vaqtinchalik band bo'lib qolsa (503 kabi) qayta urinish sozlamalari
-API_RETRY_ATTEMPTS = 4
-API_RETRY_BASE_DELAY = 3  # soniya, har urinishda ko'payadi: 3s, 6s, 9s...
+API_RETRY_ATTEMPTS = 3  # har bir model uchun
+API_RETRY_BASE_DELAY = 3  # soniya, har urinishda ko'payadi: 3s, 6s...
+
+
+def _is_retryable(error: Exception) -> bool:
+    code = getattr(error, "code", None)
+    # 4xx (429 dan tashqari) — masalan model topilmadi/noto'g'ri so'rov: qayta urinish befoyda
+    return not (isinstance(code, int) and 400 <= code < 500 and code != 429)
 
 
 def call_gemini(prompt: str, json_mode: bool = False):
-    """Gemini API'ni chaqiradi, vaqtinchalik xatoliklarda (503 va h.k.) qayta urinadi."""
+    """Gemini API'ni chaqiradi: vaqtinchalik xatoliklarda (503, 429) qayta urinadi,
+    keyin zaxira modellarga o'tadi."""
     config = genai_types.GenerateContentConfig(response_mime_type="application/json") if json_mode else None
     last_error: Exception | None = None
-    for attempt in range(1, API_RETRY_ATTEMPTS + 1):
-        try:
-            return gemini_client.models.generate_content(
-                model=GEMINI_MODEL, contents=prompt, config=config
-            )
-        except Exception as e:
-            last_error = e
-            logger.warning(
-                "Gemini API xatoligi (urinish %s/%s): %s", attempt, API_RETRY_ATTEMPTS, e
-            )
-            if attempt < API_RETRY_ATTEMPTS:
-                time.sleep(API_RETRY_BASE_DELAY * attempt)
+    for model in [GEMINI_MODEL, *GEMINI_FALLBACK_MODELS]:
+        for attempt in range(1, API_RETRY_ATTEMPTS + 1):
+            try:
+                return gemini_client.models.generate_content(model=model, contents=prompt, config=config)
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "Gemini API xatoligi (%s, urinish %s/%s): %s", model, attempt, API_RETRY_ATTEMPTS, e
+                )
+                if not _is_retryable(e):
+                    break
+                if attempt < API_RETRY_ATTEMPTS:
+                    time.sleep(API_RETRY_BASE_DELAY * attempt)
     raise last_error
 
 
