@@ -129,7 +129,7 @@ function applyBoldMarkup(text: string): string {
 // ---------------------------------------------------------------------------
 
 // Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tamiz
-const GEMINI_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+const GEMINI_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"];
 
 async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<string> {
   const body: Record<string, unknown> = {
@@ -140,7 +140,7 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
   }
 
   const attemptsPerModel = 3;
-  let lastError = "";
+  const errors: string[] = [];
   for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS]) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
     for (let attempt = 1; attempt <= attemptsPerModel; attempt++) {
@@ -155,7 +155,7 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
         if (typeof text === "string") return text.trim();
         throw new Error("Gemini javobida matn topilmadi");
       }
-      lastError = `${model}: ${res.status} ${await res.text()}`;
+      errors.push(`${model}: ${res.status} ${(await res.text()).slice(0, 120).replace(/\s+/g, " ")}`);
       const retryable = res.status === 429 || res.status >= 500;
       if (!retryable) break; // masalan 404 (model yo'q) — shu modelni qayta urinmasdan keyingisiga
       if (attempt < attemptsPerModel) {
@@ -163,7 +163,7 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
       }
     }
   }
-  throw new Error(`Gemini API xatoligi: ${lastError}`);
+  throw new Error(`Gemini API xatoligi — ${errors.join(" | ")}`);
 }
 
 // ---------------------------------------------------------------------------

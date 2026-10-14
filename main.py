@@ -56,7 +56,7 @@ HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL")
 
 GEMINI_MODEL = "gemini-3.6-flash"
 # Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tiladi
-GEMINI_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+GEMINI_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"]
 TIMEZONE = "Asia/Tashkent"
 POST_TIMES = [(9, 0)]  # (soat, minut) — Toshkent vaqti, har kuni soat 9:00 da fact post
 FLEX_POST_TIME = (20, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 20:00 da flex/countdown post
