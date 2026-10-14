@@ -52,6 +52,7 @@ export interface Env {
   GITHUB_TOKEN_MHP: string; // my-harvard-path repo'ga alohida cheklangan token (flex.html sync uchun)
   DB: D1Database; // gamifikatsiya: users, quizzes, quiz_answers, settings jadvallari
   ASSETS: Fetcher; // Mini App statik fayllari (public/)
+  AI: { run(model: string, input: unknown): Promise<any> }; // Cloudflare Workers AI (rasm generatsiyasi)
 }
 
 const POINTS_CORRECT = 10;
@@ -986,7 +987,7 @@ const PUBLIC_COMMANDS_TEXT = `/fact — hoziroq qiziqarli fakt oling
 
 const ADMIN_COMMANDS_TEXT = `/post_now facts|poll|flex — kanalga hoziroq post yuborish
 /post_now myth|essay|story|thisorthat|word|faq|campus — maxsus haftalik formatlar
-/preview <tur> — kanalga yubormasdan, sizga preview (yuqoridagi turlar)
+/preview tur — kanalga yubormasdan, sizga preview + "Kanalga joylash" tugmasi (turlar yuqoridagi kabi)
 /post_leaderboard — TOP 10'ni kanalga post qilish
 /opendate rasmiy|norasmiy YYYY-MM-DD — FLEX ochilish sanasi
 /deadline rasmiy|norasmiy YYYY-MM-DD — FLEX yopilish/muddat sanasi
@@ -1375,6 +1376,19 @@ JSON: {"fact": "...", "image_prompt": "..."}`
 async function generateImage(env: Env, prompt: string): Promise<{ data: string; mime: string } | null> {
   const remaining = (invocationDeadline ?? Date.now() + 60000) - Date.now();
   if (remaining < 6000) return null; // byudjet tugagan — rasmsiz, matn bilan davom etamiz
+
+  // 1) Cloudflare Workers AI (FLUX schnell) — Gemini rasm modeli bepul kalitda kvotasiz (429)
+  try {
+    const out = await env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
+      prompt: `${prompt}. Flat editorial illustration style, warm colors, no text or letters in the image.`.slice(0, 1800),
+      steps: 6,
+    });
+    if (typeof out?.image === "string" && out.image.length > 100) return { data: out.image, mime: "image/jpeg" };
+  } catch {
+    // Workers AI ishlamasa — Gemini'ga o'tamiz
+  }
+
+  // 2) Zaxira: Gemini rasm modeli
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
     const res = await fetch(url, {
