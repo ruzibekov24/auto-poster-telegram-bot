@@ -62,15 +62,13 @@ const GITHUB_OWNER = "ruzibekov24";
 const GITHUB_REPO = "auto-poster-telegram-bot";
 const WORKFLOW_FILE = "post.yml";
 
-// main.py'dagi ADMIN_BOT_USERNAME bilan qo'lda sinxronlab turing
-const ADMIN_BOT_USERNAME = "@MHP_adminbot";
-
 // flex-radar/notify/telegram_notifier.py'dagi SEPARATOR bilan qo'lda sinxronlab turing
 const FLEX_RADAR_SEPARATOR = "─".repeat(8);
 
 // post.yml'dagi cron jadvali bilan qo'lda sinxronlab turing (UTC soatlari)
 const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
   { hourUtc: 4, type: "facts", label: "🧠 Fact post" },
+  { hourUtc: 7, type: "special", label: "🎲 Kunlik maxsus post (myth/essay/story/...)" },
   { hourUtc: 9, type: "poll", label: "🗳 Poll/Viktorina" },
   { hourUtc: 15, type: "flex", label: "✈️ FLEX countdown" },
 ];
@@ -89,8 +87,7 @@ const EMOJI_BAN_NOTE =
 const NO_CTA_NOTE =
   "MUHIM: matn ichida botga/kanalga o'tishga chaqiruvchi jumlalar YOZMA — masalan " +
   '"botda mashq qiling", "botga o\'ting", "quyidagi tugmani bosing", "@bot orqali ' +
-  'ko\'proq bilib oling" kabi. Bu allaqachon postning pastida alohida qo\'shiladi, ' +
-  "matn ichida takrorlash shart emas. Faqat fakt/savol mazmuniga e'tibor qarat.";
+  'ko\'proq bilib oling" kabi. Faqat fakt/savol mazmuniga e\'tibor qarat.';
 
 const CATEGORY_EMOJI: Record<string, string> = {
   "Crazy facts (fizika, koinot, inson tanasi, hayvonot dunyosi haqida hayratlanarli faktlar)": "🤯",
@@ -98,6 +95,7 @@ const CATEGORY_EMOJI: Record<string, string> = {
   "About love (lowkey/hazil uslubda, jiddiy emas — sevgi psixologiyasi haqida kulgili tarzda)": "💘",
   "Random weird facts (g'alati, kam ma'lum faktlar)": "👽",
   "Tech/space facts": "🚀",
+  "Ivy League / top universitetlar va elite akademiyalar haqida qiziqarli, kam ma'lum faktlar (tarix, an'analar, mashhur bitiruvchilar)": "🎓",
 };
 const CATEGORIES = Object.keys(CATEGORY_EMOJI);
 const HOOKS = ["#Facts", "🧠 Did you know?", "🤯 Fact time:", "👀 Ever wondered?"];
@@ -105,11 +103,12 @@ const FLEX_HOOKS = ["✈️ FLEX countdown:", "⏳ Reality check:", "🔥 FLEX f
 const POLL_TOPICS = [
   "Random qiziqarli fakt/ilmiy trivia (fizika, koinot, hayvonot dunyosi, inson tanasi)",
   "FLEX (Future Leaders Exchange Program) dasturi haqida trivia",
+  "Ivy League universitetlari va top akademiyalar (MIT, Stanford, Exeter) haqida trivia",
   "Talaba hayoti, o'qish odatlari haqida hazil-mutoyibali savol",
   "Gen-Z / kundalik hayot haqida qiziqarli fikr-mulohaza savoli",
 ];
 // main.py'dagi APPROX_ROUNDS bilan qo'lda sinxronlab turing
-const APPROX_ROUNDS = [{ name: "FLEX ariza topshirish muddati", month: 9, day: 12 }];
+const APPROX_ROUNDS = [{ name: "FLEX ariza topshirish muddati", month: 10, day: 22 }];
 
 // ---------------------------------------------------------------------------
 // Yordamchi: HTML escape + **so'z** -> <b>so'z</b>
@@ -401,6 +400,23 @@ ${SPLIT_MARKER}
 <REAKSIYA matni>`;
 }
 
+// main.py'dagi PROGRAM_STAGES bilan qo'lda sinxronlab turing (FLEX 2027-2028 Program Calendar)
+const PROGRAM_STAGES: { start: string; end: string; label: string }[] = [
+  { start: "2026-10-23", end: "2026-10-31", label: "Onlayn ingliz tili testi (2-bosqich) — havola kelgach 24 soat ichida topshiring" },
+  { start: "2026-10-01", end: "2026-12-31", label: "Yarim finalistlar e'loni" },
+  { start: "2026-11-01", end: "2027-01-31", label: "Intervyu, ingliz tili bahosi, insholar, yarim finalist arizasi" },
+  { start: "2027-03-01", end: "2027-05-31", label: "Finalistlar e'loni" },
+  { start: "2027-06-01", end: "2027-07-31", label: "Jo'nashdan oldingi orientatsiyalar" },
+  { start: "2027-08-01", end: "2027-08-31", label: "Ishtirokchilar AQShga jo'naydi" },
+];
+
+function currentStages(): string[] {
+  const today = new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10); // Toshkent sanasi
+  return PROGRAM_STAGES.filter((s) => s.start <= today && today <= s.end)
+    .map((s) => s.label)
+    .slice(0, 2);
+}
+
 async function buildFlexHtml(env: Env): Promise<string> {
   const raw = await callGemini(env, buildFlexPrompt());
   const [factPart, reactionPart] = raw.split(SPLIT_MARKER);
@@ -414,18 +430,19 @@ async function buildFlexHtml(env: Env): Promise<string> {
     ? `📅 <b>${daysLeft} kun qoldi</b> — ${escapeHtml(name)}`
     : `📅 Taxminan <b>~${daysLeft} kun</b> qoldi — ${escapeHtml(name)} (aniq sana e'lon qilinganda yangilanadi)`;
 
+  const stages = currentStages();
+  const stageLine = stages.length ? `\n📍 Hozirgi bosqich (taxminiy): ${escapeHtml(stages.join("; "))}` : "";
+
   return [
     escapeHtml(hook),
     factHtml,
     "",
-    countdownLine,
+    countdownLine + stageLine,
     "",
     `<tg-spoiler>${escapeHtml(reaction)}</tg-spoiler>`,
     "",
     "#FLEX #FutureLeadersExchange",
     `✈️ @${env.CHANNEL_USERNAME.replace(/^@/, "")}`,
-    "",
-    `🤖 Ball to'plash, reyting va ko'proq ma'lumot uchun: ${ADMIN_BOT_USERNAME}`,
   ].join("\n");
 }
 
@@ -826,7 +843,7 @@ function buildQuizMessageHtml(poll: PollData): string {
   const optionsHtml = poll.options
     .map((opt, i) => `${letters[i] ?? i + 1}) ${escapeHtml(opt)}`)
     .join("\n");
-  return `🧠 <b>Viktorina!</b>\n\n${escapeHtml(poll.question)}\n\n${optionsHtml}\n\nJavobni pastdagi tugmalardan tanlang 👇\n\n🤖 Ball va reyting: ${ADMIN_BOT_USERNAME}`;
+  return `🧠 <b>Viktorina!</b>\n\n${escapeHtml(poll.question)}\n\n${optionsHtml}\n\nJavobni pastdagi tugmalardan tanlang 👇`;
 }
 
 async function postGamifiedQuiz(env: Env): Promise<void> {
@@ -886,8 +903,8 @@ async function handlePostNowCommand(env: Env, chatId: number, fromId: number, ar
   if (!(await requireAdmin(env, chatId, fromId))) return;
 
   const target = args[0];
-  if (!["facts", "poll", "flex"].includes(target)) {
-    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Foydalanish: /post_now facts|poll|flex");
+  if (!["facts", "poll", "flex", ...SPECIAL_KINDS].includes(target)) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `Foydalanish: /post_now facts|poll|flex|${SPECIAL_KINDS.join("|")}`);
     return;
   }
 
@@ -902,6 +919,8 @@ async function handlePostNowCommand(env: Env, chatId: number, fromId: number, ar
     } else if (target === "flex") {
       const html = await buildFlexHtml(env);
       await sendMessage(env.BOT_TOKEN, env.CHANNEL_ID, html, true);
+    } else if ((SPECIAL_KINDS as string[]).includes(target)) {
+      await deliverSpecial(env, env.CHANNEL_ID, await buildSpecial(env, target as SpecialKind));
     } else {
       await postDailyPollOrQuiz(env);
     }
@@ -923,8 +942,6 @@ function buildFactHtmlForChannel(env: Env, category: string, fact: string, react
     "",
     "#Facts",
     `${emoji} @${env.CHANNEL_USERNAME.replace(/^@/, "")}`,
-    "",
-    `🤖 Ball to'plash, reyting va ko'proq fakt uchun: ${ADMIN_BOT_USERNAME}`,
   ].join("\n");
 }
 
@@ -944,7 +961,8 @@ const PUBLIC_COMMANDS_TEXT = `/fact — hoziroq qiziqarli fakt oling
 /help — shu ro'yxatni qayta ko'rish`;
 
 const ADMIN_COMMANDS_TEXT = `/post_now facts|poll|flex — kanalga hoziroq post yuborish
-/preview facts|poll|flex — kanalga yubormasdan, sizga preview
+/post_now myth|essay|story|thisorthat|word|faq|campus — maxsus haftalik formatlar
+/preview <tur> — kanalga yubormasdan, sizga preview (yuqoridagi turlar)
 /post_leaderboard — TOP 10'ni kanalga post qilish
 /opendate rasmiy|norasmiy YYYY-MM-DD — FLEX ochilish sanasi
 /deadline rasmiy|norasmiy YYYY-MM-DD — FLEX yopilish/muddat sanasi
@@ -975,8 +993,8 @@ async function handlePreviewCommand(env: Env, chatId: number, fromId: number, ar
   if (!(await requireAdmin(env, chatId, fromId))) return;
 
   const target = args[0];
-  if (!["facts", "poll", "flex"].includes(target)) {
-    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, "Foydalanish: /preview facts|poll|flex");
+  if (!["facts", "poll", "flex", ...SPECIAL_KINDS].includes(target)) {
+    await sendMessage(env.ADMIN_BOT_TOKEN, chatId, `Foydalanish: /preview facts|poll|flex|${SPECIAL_KINDS.join("|")}`);
     return;
   }
 
@@ -991,6 +1009,8 @@ async function handlePreviewCommand(env: Env, chatId: number, fromId: number, ar
     } else if (target === "flex") {
       const html = await buildFlexHtml(env);
       await sendMessage(env.ADMIN_BOT_TOKEN, chatId, html, true);
+    } else if ((SPECIAL_KINDS as string[]).includes(target)) {
+      await deliverSpecial(env, chatId, await buildSpecial(env, target as SpecialKind));
     } else {
       const pollType: "quiz" | "regular" = Math.random() < 0.5 ? "quiz" : "regular";
       const poll = await generatePoll(env, pollType);
@@ -1165,6 +1185,260 @@ async function handlePostLeaderboardCommand(env: Env, chatId: number, fromId: nu
 }
 
 // ---------------------------------------------------------------------------
+// Haftalik maxsus postlar (kuniga 12:00 Toshkent) — fakt/flex/poll'dan tashqari
+// xilma-xil formatlar. Mavzu FLEX va Ivy League/top akademiyalar orasida aralashadi.
+// Yakshanba: campus rasmi + haftalik leaderboard.
+// ---------------------------------------------------------------------------
+
+type SpecialKind = "myth" | "essay" | "story" | "thisorthat" | "word" | "faq" | "campus";
+const SPECIAL_KINDS: SpecialKind[] = ["myth", "essay", "story", "thisorthat", "word", "faq", "campus"];
+// getUTCDay(): 0=Yakshanba ... 6=Shanba
+const WEEKDAY_SPECIAL: SpecialKind[] = ["campus", "myth", "essay", "story", "thisorthat", "word", "faq"];
+const SPECIAL_CRON = "0 7 * * *"; // 07:00 UTC = 12:00 Toshkent
+
+const SPECIAL_TRACKS = [
+  "FLEX (Future Leaders Exchange Program — AQSh davlat dasturi, O'zbekiston maktab o'quvchilari uchun bir yillik bepul almashinuv)",
+  "Ivy League universitetlari (Harvard, Yale, Princeton, Columbia, UPenn, Brown, Cornell, Dartmouth) va ularga qabul",
+  "AQShdagi top universitetlar va elite akademiyalar/boarding school'lar (MIT, Stanford, Phillips Exeter, Andover kabi), stipendiya, SAT/Common App",
+];
+
+const CAMPUS_NAMES = [
+  "Harvard University", "Yale University", "Princeton University", "Columbia University",
+  "University of Pennsylvania", "Brown University", "Cornell University", "Dartmouth College",
+  "MIT", "Stanford University", "Caltech", "University of Chicago", "Duke University",
+  "Phillips Exeter Academy", "Phillips Academy Andover", "Choate Rosemary Hall", "Deerfield Academy",
+];
+
+const GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
+
+const SPECIAL_ACCURACY_NOTE =
+  "MUHIM: faqat barqaror, ishonchli ma'lumot yoz. Aniq sana, qabul foizi, narx yoki raqamni " +
+  "FAQAT to'liq ishonching komil bo'lsa yoz, aks holda umumiy tilda ifodala. Hech narsani to'qima.";
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+async function geminiJson<T>(env: Env, prompt: string): Promise<T> {
+  return JSON.parse(await callGemini(env, prompt, true)) as T;
+}
+
+function specialFooter(env: Env, tags: string, emoji: string): string {
+  return `\n\n${tags}\n${emoji} @${env.CHANNEL_USERNAME.replace(/^@/, "")}`;
+}
+
+type SpecialPost =
+  | { type: "text"; html: string }
+  | { type: "photo"; html: string; imagePrompt: string }
+  | { type: "poll"; poll: PollData };
+
+async function buildSpecial(env: Env, kind: SpecialKind): Promise<SpecialPost> {
+  const track = pickRandom(SPECIAL_TRACKS);
+  const audience = "Auditoriya: AQShga/top universitetlarga tayyorlanayotgan O'zbekistonlik Gen-Z o'quvchilar.";
+  const style = "Ohang: samimiy, hazil-mutoyibali, jiddiy/akademik emas.";
+  const common = `${audience}\n${style}\nMavzu yo'nalishi: ${track}\n\n${EMOJI_BAN_NOTE}\n\n${NO_CTA_NOTE}\n\n${SPECIAL_ACCURACY_NOTE}`;
+
+  switch (kind) {
+    case "myth": {
+      const d = await geminiJson<{ myth: string; reality: string }>(
+        env,
+        `Telegram kanali uchun "Myth vs Reality" post yoz. ${common}
+
+Keng tarqalgan bitta MIFni (noto'g'ri tasavvur) va uning HAQIQATini o'zbek tilida (lotin) yoz.
+Har biri 1-2 qisqa jumla. Mif odamlar ishonadigan darajada real bo'lsin.
+
+JSON: {"myth": "...", "reality": "..."}`
+      );
+      return {
+        type: "text",
+        html:
+          `🧩 <b>Myth vs Reality</b>\n\n❌ <b>Mif:</b> ${escapeHtml(d.myth)}\n\n` +
+          `<tg-spoiler>✅ <b>Haqiqat:</b> ${escapeHtml(d.reality)}</tg-spoiler>` +
+          specialFooter(env, "#MythVsReality", "🧩"),
+      };
+    }
+    case "essay": {
+      const d = await geminiJson<{ question: string; tip: string }>(
+        env,
+        `Telegram kanali uchun kunlik "Writing Challenge" yoz. ${common}
+
+1) question: ariza inshosi yoki intervyu savoli (INGLIZ tilida, 1-2 jumla, o'ylantiradigan).
+2) tip: shu savolga qanday yondashish haqida qisqa maslahat (o'zbek tilida, 1-2 jumla).
+
+JSON: {"question": "...", "tip": "..."}`
+      );
+      return {
+        type: "text",
+        html:
+          `✍️ <b>Writing Challenge</b>\n\n${escapeHtml(d.question)}\n\n💡 <i>${escapeHtml(d.tip)}</i>\n\n` +
+          `Javobingizni izohlarda yozing 👇` +
+          specialFooter(env, "#WritingChallenge", "✍️"),
+      };
+    }
+    case "story": {
+      const d = await geminiJson<{ title: string; story: string; image_prompt: string }>(
+        env,
+        `Telegram kanali uchun mini-hikoya yoz. ${common}
+
+Bitta o'quvchining (xayoliy ism bilan) shu mavzudagi real-hayotiy lahzasi: 3-5 jumla, o'zbek tilida (lotin),
+oxirida kutilmagan yoki ilhomlantiruvchi burilish. Jami 600 belgidan oshmasin.
+image_prompt: shu sahna uchun INGLIZ tilida rasm tavsifi (flat illustration, iliq ranglar, rasm ichida HECH QANDAY yozuv yo'q).
+
+JSON: {"title": "...", "story": "...", "image_prompt": "..."}`
+      );
+      return {
+        type: "photo",
+        imagePrompt: d.image_prompt,
+        html: `📖 <b>${escapeHtml(d.title)}</b>\n\n${escapeHtml(d.story)}` + specialFooter(env, "#MiniStory", "📖"),
+      };
+    }
+    case "thisorthat": {
+      const d = await geminiJson<{ question: string; options: string[] }>(
+        env,
+        `Telegram so'rovnomasi uchun "This or That" yoz. ${common}
+
+question: "This or That?" bilan boshlanadigan qisqa sarlavha (INGLIZ tilida, max 120 belgi), mavzu: tanlov
+(masalan o'qish/hayot/odat/orzu). options: aniq 2 ta variant (INGLIZ tilida, har biri max 60 belgi).
+
+JSON: {"question": "...", "options": ["...", "..."]}`
+      );
+      return { type: "poll", poll: { question: d.question.slice(0, 250), options: d.options.slice(0, 2) } };
+    }
+    case "word": {
+      const d = await geminiJson<{ term: string; meaning: string; example: string; uz: string }>(
+        env,
+        `Telegram kanali uchun "Word of the day" yoz. ${common}
+
+Foydali amerikacha sleng, ibora yoki akademik/ariza so'zi (maktab, college, kundalik hayot).
+term: so'z/ibora. meaning: INGLIZ tilida oddiy izoh (1 jumla). example: INGLIZ tilida misol gap. uz: o'zbekcha tarjima/ma'no.
+
+JSON: {"term": "...", "meaning": "...", "example": "...", "uz": "..."}`
+      );
+      return {
+        type: "text",
+        html:
+          `🗣 <b>Word of the day:</b> ${escapeHtml(d.term)}\n\n${escapeHtml(d.meaning)}\n\n` +
+          `💬 <i>${escapeHtml(d.example)}</i>\n\n🇺🇿 ${escapeHtml(d.uz)}` +
+          specialFooter(env, "#WordOfTheDay", "🗣"),
+      };
+    }
+    case "faq": {
+      const d = await geminiJson<{ question: string; answer: string }>(
+        env,
+        `Telegram kanali uchun "Ko'p so'raladigan savol" posti yoz. ${common}
+
+question: o'quvchilar tez-tez so'raydigan savol. answer: aniq, foydali javob (2-4 jumla). Ikkalasi ham o'zbek tilida (lotin).
+
+JSON: {"question": "...", "answer": "..."}`
+      );
+      return {
+        type: "text",
+        html:
+          `❓ <b>${escapeHtml(d.question)}</b>\n\n${escapeHtml(d.answer)}\n\n` +
+          `Sizda ham savol bormi? Izohlarda yozing 👇` +
+          specialFooter(env, "#QnA", "❓"),
+      };
+    }
+    case "campus": {
+      const name = pickRandom(CAMPUS_NAMES);
+      const d = await geminiJson<{ fact: string; image_prompt: string }>(
+        env,
+        `Telegram kanali uchun "Campus of the week" posti yoz: ${name}. ${audience}\n${style}\n\n${EMOJI_BAN_NOTE}\n\n${NO_CTA_NOTE}\n\n${SPECIAL_ACCURACY_NOTE}
+
+fact: shu maktab/universitet haqida qiziqarli fakt yoki an'ana (o'zbek tilida lotin, 2 jumla, max 350 belgi).
+image_prompt: INGLIZ tilida rasm tavsifi — ${name} ruhidagi stilizatsiya qilingan illustration (klassik me'morchilik, kuz yoki tong, rasm ichida HECH QANDAY yozuv yo'q).
+
+JSON: {"fact": "...", "image_prompt": "..."}`
+      );
+      return {
+        type: "photo",
+        imagePrompt: d.image_prompt,
+        html: `🏛 <b>${escapeHtml(name)}</b>\n\n${escapeHtml(d.fact)}` + specialFooter(env, "#CampusOfTheWeek", "🏛"),
+      };
+    }
+  }
+}
+
+async function generateImage(env: Env, prompt: string): Promise<{ data: string; mime: string } | null> {
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${prompt}. Flat editorial illustration style, no text or letters in the image.` }] }],
+        generationConfig: { responseModalities: ["IMAGE"] },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as any;
+    const parts: any[] = data?.candidates?.[0]?.content?.parts ?? [];
+    const img = parts.find((p) => p.inlineData?.data);
+    return img ? { data: img.inlineData.data, mime: img.inlineData.mimeType ?? "image/png" } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendPhotoBytes(
+  token: string,
+  chatId: number | string,
+  image: { data: string; mime: string },
+  caption?: string
+) {
+  const bin = atob(image.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("photo", new Blob([bytes], { type: image.mime }), "image.png");
+  if (caption) {
+    form.append("caption", caption);
+    form.append("parse_mode", "HTML");
+  }
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
+  const out = (await res.json()) as any;
+  if (!out.ok) throw new Error(`Telegram API xatoligi (sendPhoto): ${JSON.stringify(out)}`);
+}
+
+async function deliverSpecial(env: Env, chatId: number | string, post: SpecialPost): Promise<void> {
+  const token = env.ADMIN_BOT_TOKEN;
+  if (post.type === "poll") {
+    await sendPoll(token, chatId, post.poll, "regular", true);
+  } else if (post.type === "photo") {
+    const image = await generateImage(env, post.imagePrompt);
+    if (!image) {
+      await sendMessage(token, chatId, post.html, true); // rasm chiqmasa — matn bilan davom etamiz
+    } else if (post.html.length <= 1000) {
+      await sendPhotoBytes(token, chatId, image, post.html);
+    } else {
+      await sendPhotoBytes(token, chatId, image);
+      await sendMessage(token, chatId, post.html, true);
+    }
+  } else {
+    await sendMessage(token, chatId, post.html, true);
+  }
+}
+
+async function postWeeklyLeaderboard(env: Env): Promise<void> {
+  const top = await getLeaderboard(env, 10);
+  if (!top.length) return;
+  await sendMessage(
+    env.ADMIN_BOT_TOKEN,
+    env.CHANNEL_ID,
+    `🏆 Haftalik TOP ${top.length} faol o'quvchi:\n\n${formatLeaderboard(top)}\n\n#Leaderboard`
+  );
+}
+
+async function postWeeklySpecial(env: Env): Promise<void> {
+  const tashkentDay = new Date(Date.now() + 5 * 3600 * 1000).getUTCDay();
+  const kind = WEEKDAY_SPECIAL[tashkentDay];
+  await deliverSpecial(env, env.CHANNEL_ID, await buildSpecial(env, kind));
+  if (tashkentDay === 0) await postWeeklyLeaderboard(env);
+}
+
+// ---------------------------------------------------------------------------
 // Worker entrypoint
 // ---------------------------------------------------------------------------
 
@@ -1257,9 +1531,13 @@ export default {
     return new Response("OK");
   },
 
-  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const paused = await getSetting(env, "paused");
     if (paused === "true") return;
+    if (event.cron === SPECIAL_CRON) {
+      await postWeeklySpecial(env);
+      return;
+    }
     await postDailyPollOrQuiz(env);
   },
 };

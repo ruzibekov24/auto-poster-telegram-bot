@@ -42,10 +42,6 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", CHANNEL_ID or "@MyHarvardPath")
 
-# Ball/leaderboard/interaktiv buyruqlarni boshqaradigan admin bot — postlar tagida
-# ko'rsatiladi, shunda odamlar botga qanday kirishni bilib oladi
-ADMIN_BOT_USERNAME = os.getenv("ADMIN_BOT_USERNAME", "@MHP_adminbot")
-
 # Ixtiyoriy: har bir post natijasi (muvaffaqiyat/xato) haqida shaxsiy xabar olish uchun
 # o'z Telegram chat ID'ingizni kiriting (@userinfobot orqali bilib olish mumkin)
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
@@ -85,10 +81,10 @@ def load_deadline_config() -> dict:
         return {}
 
 # FLEX dasturi arizasi har yili taqriban sentyabr o'rtalarida yopiladi — aniq sana
-# e'lon qilinmaguncha shu taxminiy sana asosida countdown ko'rsatiladi (foydalanuvchi
-# tasdig'i: 10-15 sentyabr oralig'i, o'rtacha 12-sentyabr olindi)
+# e'lon qilinmaguncha shu taxminiy sana asosida countdown ko'rsatiladi (2026 yilda
+# O'zbekiston uchun muddat 22-oktabr bo'ldi, shu sana taxmin sifatida olindi)
 APPROX_ROUNDS = [
-    {"name": "FLEX ariza topshirish muddati", "month": 9, "day": 12},
+    {"name": "FLEX ariza topshirish muddati", "month": 10, "day": 22},
 ]
 
 # Har bir kategoriya uchun mos emoji — kanal mention qatorida ishlatiladi
@@ -98,6 +94,7 @@ CATEGORY_EMOJI = {
     "About love (lowkey/hazil uslubda, jiddiy emas — sevgi psixologiyasi haqida kulgili tarzda)": "💘",
     "Random weird facts (g'alati, kam ma'lum faktlar)": "👽",
     "Tech/space facts": "🚀",
+    "Ivy League / top universitetlar va elite akademiyalar haqida qiziqarli, kam ma'lum faktlar (tarix, an'analar, mashhur bitiruvchilar)": "🎓",
 }
 CATEGORIES = list(CATEGORY_EMOJI.keys())
 
@@ -159,13 +156,12 @@ EMOJI_BAN_NOTE = (
     "variantlardan tanlab, bir xilini qayta-qayta ishlatma)."
 )
 
-# Postning pastida statik footer ("Ball to'plash... @MHP_adminbot") allaqachon bor —
-# AI matn ichida yana botni reklama qilib, takrorlashi kerak emas
+# Oddiy foydalanuvchilarga botni reklama qilmaymiz — AI matn ichida ham botga/kanalga
+# chaqiruv yozmasligi kerak
 NO_CTA_NOTE = (
     "MUHIM: matn ichida botga/kanalga o'tishga chaqiruvchi jumlalar YOZMA — masalan "
     "\"botda mashq qiling\", \"botga o'ting\", \"quyidagi tugmani bosing\", \"@bot orqali "
-    "ko'proq bilib oling\" kabi. Bu allaqachon postning pastida alohida qo'shiladi, "
-    "matn ichida takrorlash shart emas. Faqat fakt/savol mazmuniga e'tibor qarat."
+    "ko'proq bilib oling\" kabi. Faqat fakt/savol mazmuniga e'tibor qarat."
 )
 
 # Gemini API vaqtinchalik band bo'lib qolsa (503 kabi) qayta urinish sozlamalari
@@ -268,8 +264,7 @@ def build_post_text(category: str) -> tuple[str, str]:
         f"{fact_html}\n\n"
         f"<tg-spoiler>{html.escape(reaction_text)}</tg-spoiler>\n\n"
         f"#Facts\n"
-        f"{emoji} {html.escape(CHANNEL_USERNAME)}\n\n"
-        f"🤖 Ball to'plash, reyting va ko'proq fakt uchun: {html.escape(ADMIN_BOT_USERNAME)}"
+        f"{emoji} {html.escape(CHANNEL_USERNAME)}"
     )
     # recent_facts.json'ga **belgilarisiz** toza matnni saqlaymiz
     plain_fact = fact_text.replace("**", "")
@@ -318,6 +313,24 @@ def next_deadline() -> tuple[str, int, bool]:
             target = date(today.year + 1, round_info["month"], round_info["day"])
         approx_candidates.append((round_info["name"], (target - today).days, False))
     return min(approx_candidates, key=lambda c: c[1])
+
+
+# FLEX 2027-2028 Program Calendar (discoverflex.org). Oraliqlar oy bo'yicha berilgan
+# (rasmiy jadvalda "October 2026", "March-May 2027" kabi), shuning uchun taxminiy.
+# admin-worker/src/index.ts'dagi PROGRAM_STAGES bilan qo'lda sinxronlab turing.
+PROGRAM_STAGES = [
+    (date(2026, 10, 23), date(2026, 10, 31), "Onlayn ingliz tili testi (2-bosqich) — havola kelgach 24 soat ichida topshiring"),
+    (date(2026, 10, 1), date(2026, 12, 31), "Yarim finalistlar e'loni"),
+    (date(2026, 11, 1), date(2027, 1, 31), "Intervyu, ingliz tili bahosi, insholar, yarim finalist arizasi"),
+    (date(2027, 3, 1), date(2027, 5, 31), "Finalistlar e'loni"),
+    (date(2027, 6, 1), date(2027, 7, 31), "Jo'nashdan oldingi orientatsiyalar"),
+    (date(2027, 8, 1), date(2027, 8, 31), "Ishtirokchilar AQShga jo'naydi"),
+]
+
+
+def current_stages() -> list[str]:
+    today = datetime.now(ZoneInfo(TIMEZONE)).date()
+    return [label for start, end, label in PROGRAM_STAGES if start <= today <= end][:2]
 
 
 FLEX_HOOKS = ["✈️ FLEX countdown:", "⏳ Reality check:", "🔥 FLEX fact:", "🌎 Exchange szn:"]
@@ -397,14 +410,17 @@ def build_flex_post_text() -> tuple[str, str]:
             "(aniq sana e'lon qilinganda yangilanadi)"
         )
 
+    stages = current_stages()
+    if stages:
+        countdown_line += "\n📍 Hozirgi bosqich (taxminiy): " + html.escape("; ".join(stages))
+
     post_html = (
         f"{html.escape(hook)}\n"
         f"{fact_html}\n\n"
         f"{countdown_line}\n\n"
         f"<tg-spoiler>{html.escape(reaction_text)}</tg-spoiler>\n\n"
         f"#FLEX #FutureLeadersExchange\n"
-        f"✈️ {html.escape(CHANNEL_USERNAME)}\n\n"
-        f"🤖 Ball to'plash, reyting va ko'proq ma'lumot uchun: {html.escape(ADMIN_BOT_USERNAME)}"
+        f"✈️ {html.escape(CHANNEL_USERNAME)}"
     )
     plain_fact = fact_text.replace("**", "")
     return post_html, plain_fact

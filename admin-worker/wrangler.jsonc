@@ -15,7 +15,7 @@
     }
   ],
   "triggers": {
-    "crons": ["0 9 * * *"]
+    "crons": ["0 9 * * *", "0 7 * * *"]
   },
   "assets": {
     "directory": "./public",
