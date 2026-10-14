@@ -129,7 +129,11 @@ function applyBoldMarkup(text: string): string {
 // ---------------------------------------------------------------------------
 
 // Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tamiz
-const GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash"];
+const GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash"]; // gemini-2.5/2.0-flash Google tomonidan o'chirilgan
+
+// Telegram buyrug'i fonda (waitUntil, ~30s limit) bajarilganda umumiy vaqt byudjeti shu yerda saqlanadi.
+// Cron'da (null) byudjet kengroq.
+let invocationDeadline: number | null = null;
 
 async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<string> {
   const body: Record<string, unknown> = {
@@ -140,20 +144,21 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
   }
 
   // Band modelda kutib o'tirmaymiz — darrov keyingisiga o'tamiz. Hammasi band bo'lsa,
-  // qisqa pauzadan so'ng yana bir aylanish (umumiy byudjet ~22s, Worker waitUntil limiti 30s).
-  const deadline = Date.now() + 22000;
+  // qisqa pauzadan so'ng yana bir aylanish. 3.8 kabi "o'ylaydigan" model 10s+ olishi mumkin.
+  const deadline = invocationDeadline ?? Date.now() + 60000;
   const errors: string[] = [];
   const dead = new Set<string>(); // 404 — bu model endi yo'q, qayta urinmaymiz
   for (let pass = 1; pass <= 2; pass++) {
     for (const model of [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS]) {
-      if (dead.has(model) || Date.now() > deadline) continue;
+      const remaining = deadline - Date.now();
+      if (dead.has(model) || remaining < 3000) continue;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
       try {
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(Math.min(25000, remaining - 500)),
         });
         if (res.ok) {
           const data = (await res.json()) as any;
@@ -168,7 +173,7 @@ async function callGemini(env: Env, prompt: string, jsonMode = false): Promise<s
         errors.push(`${model}: ${(e as Error).name === "TimeoutError" ? "timeout" : (e as Error).message}`);
       }
     }
-    if (pass === 1 && Date.now() < deadline - 5000) await new Promise((r) => setTimeout(r, 2500));
+    if (pass === 1 && deadline - Date.now() > 8000) await new Promise((r) => setTimeout(r, 2500));
   }
   throw new Error(`Gemini API xatoligi — ${errors.slice(-3).join(" | ")}`);
 }
@@ -1368,6 +1373,8 @@ JSON: {"fact": "...", "image_prompt": "..."}`
 }
 
 async function generateImage(env: Env, prompt: string): Promise<{ data: string; mime: string } | null> {
+  const remaining = (invocationDeadline ?? Date.now() + 60000) - Date.now();
+  if (remaining < 6000) return null; // byudjet tugagan — rasmsiz, matn bilan davom etamiz
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
     const res = await fetch(url, {
@@ -1377,7 +1384,7 @@ async function generateImage(env: Env, prompt: string): Promise<{ data: string; 
         contents: [{ parts: [{ text: `${prompt}. Flat editorial illustration style, no text or letters in the image.` }] }],
         generationConfig: { responseModalities: ["IMAGE"] },
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(Math.min(25000, remaining - 1000)),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as any;
@@ -1647,6 +1654,7 @@ export default {
     // Buyruq (Gemini, rasm) sekin bo'lishi mumkin: Telegram javob kechiksa xabarni QAYTA yuboradi
     // (preview ikki marta chiqib qolardi). Shu sabab darrov "OK" qaytarib, ishni fonda bajaramiz.
     const runCommand = async () => {
+    invocationDeadline = Date.now() + 28000; // waitUntil ~30s limiti ichida qolish uchun
     try {
       if (text === "/fact" || text === "/fact@" || text.startsWith("/fact ")) {
         await handleFactCommand(env, chatId);
