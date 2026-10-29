@@ -68,9 +68,9 @@ const FLEX_RADAR_SEPARATOR = "─".repeat(8);
 
 // post.yml'dagi cron jadvali bilan qo'lda sinxronlab turing (UTC soatlari)
 const SCHEDULE_UTC: { hourUtc: number; type: string; label: string }[] = [
-  { hourUtc: 4, type: "facts", label: "🧠 Fact post" },
+  { hourUtc: 4, type: "facts", label: "🌅 Ertalabki post (fact 2x/hafta, qolgan kunlari saytdan dars)" },
   { hourUtc: 9, type: "poll", label: "🗳 Poll/Viktorina + kunlik maxsus post (myth/essay/story/...)" },
-  { hourUtc: 15, type: "flex", label: "✈️ FLEX countdown" },
+  { hourUtc: 15, type: "flex", label: "🌙 Kechki post (FLEX 2x/hafta, qolgan kunlari real yangilik)" },
 ];
 
 const GEMINI_MODEL = "gemini-3.8-flash";

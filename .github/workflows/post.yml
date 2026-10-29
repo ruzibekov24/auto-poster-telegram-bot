@@ -2,9 +2,11 @@ name: Post Facts
 
 on:
   schedule:
-    # 04:00 UTC = 09:00 Asia/Tashkent (UTC+5, DST yo'q) — fact post
+    # 04:00 UTC = 09:00 Asia/Tashkent (UTC+5, DST yo'q) — ertalabki post
+    # (main.py MORNING_PLAN: haftada 2 marta fact, qolgan kunlari saytdan dars)
     - cron: "0 4 * * *"
-    # 15:00 UTC = 20:00 Asia/Tashkent — flex/countdown post
+    # 15:00 UTC = 20:00 Asia/Tashkent — kechki post
+    # (main.py EVENING_PLAN: haftada 2 marta flex, qolgan kunlari real yangilik)
     - cron: "0 15 * * *"
     # ESLATMA: poll/viktorina (14:00) endi Cloudflare Worker'ning o'z cron
     # trigger'i orqali yuboriladi (admin-worker/src/index.ts), chunki
@@ -17,9 +19,13 @@ on:
         description: "Qaysi post turini qo'lda yubormoqchisiz?"
         type: choice
         options:
+          - morning
+          - evening
           - facts
           - flex
-        default: facts
+          - lesson
+          - news
+        default: morning
 
 permissions:
   contents: write   # recent_*.json'ni commit qilib qaytarish uchun
@@ -40,23 +46,24 @@ jobs:
         id: which
         run: |
           if [ "${{ github.event.schedule }}" = "0 15 * * *" ]; then
-            echo "target=flex" >> "$GITHUB_OUTPUT"
+            echo "target=evening" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then
-            echo "target=facts" >> "$GITHUB_OUTPUT"
+            echo "target=morning" >> "$GITHUB_OUTPUT"
           else
-            echo "target=${{ github.event.inputs.post_type || 'facts' }}" >> "$GITHUB_OUTPUT"
+            echo "target=${{ github.event.inputs.post_type || 'morning' }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Postni yuborish
         run: |
           case "${{ steps.which.outputs.target }}" in
-            flex)
-              python -c "import asyncio; from main import send_flex_countdown_post; asyncio.run(send_flex_countdown_post())"
-              ;;
-            *)
-              python -c "import asyncio; from main import send_fact_post; asyncio.run(send_fact_post())"
-              ;;
+            morning) fn=send_morning_post ;;
+            evening) fn=send_evening_post ;;
+            facts)   fn=send_fact_post ;;
+            flex)    fn=send_flex_countdown_post ;;
+            lesson)  fn=send_lesson_post ;;
+            news)    fn=send_news_post ;;
           esac
+          python -c "import asyncio, main; asyncio.run(main.$fn())"
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
@@ -70,5 +77,6 @@ jobs:
           git config user.name "facts-bot"
           git config user.email "facts-bot@users.noreply.github.com"
           git add recent_facts.json recent_flex.json
-          git diff --cached --quiet || git commit -m "chore: update recent facts/flex [skip ci]"
+          git add recent_lessons.json recent_news.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "chore: update recent facts/flex/lessons/news [skip ci]"
           git push

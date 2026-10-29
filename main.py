@@ -17,7 +17,9 @@ import os
 import random
 import re
 import time
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -58,14 +60,22 @@ GEMINI_MODEL = "gemini-3.8-flash"
 # Asosiy model band bo'lsa (503/429) ketma-ket zaxira modellarga o'tiladi
 GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash"]  # 2.5/2.0-flash Google tomonidan o'chirilgan
 TIMEZONE = "Asia/Tashkent"
-POST_TIMES = [(9, 0)]  # (soat, minut) — Toshkent vaqti, har kuni soat 9:00 da fact post
-FLEX_POST_TIME = (20, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 20:00 da flex/countdown post
+POST_TIMES = [(9, 0)]  # (soat, minut) — Toshkent vaqti, har kuni soat 9:00 da ertalabki post
+FLEX_POST_TIME = (20, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 20:00 da kechki post
 POLL_POST_TIME = (14, 0)  # (soat, minut) — Toshkent vaqti, har kuni soat 14:00 da poll/viktorina
+
+# Haftalik jadval (0 = dushanba ... 6 = yakshanba). Fact va flex haftada 2 martadan,
+# qolgan kunlari saytdan dars (ertalab) va rasmiy manbalardan real yangilik (kechqurun).
+# "lesson" — tasodifan maqoladan dars yoki "Kunning so'zi" (lug'at).
+MORNING_PLAN = {0: "lesson", 1: "facts", 2: "lesson", 3: "lesson", 4: "facts", 5: "lesson", 6: "lesson"}
+EVENING_PLAN = {0: "flex", 1: "news", 2: "news", 3: "flex", 4: "news", 5: "news", 6: "news"}
 
 BASE_DIR = Path(__file__).resolve().parent
 RECENT_FACTS_FILE = BASE_DIR / "recent_facts.json"
 RECENT_FLEX_FILE = BASE_DIR / "recent_flex.json"
 RECENT_POLLS_FILE = BASE_DIR / "recent_polls.json"
+RECENT_LESSONS_FILE = BASE_DIR / "recent_lessons.json"
+RECENT_NEWS_FILE = BASE_DIR / "recent_news.json"
 LOG_FILE = BASE_DIR / "bot.log"
 MAX_RECENT_FACTS = 20
 MAX_GENERATION_ATTEMPTS = 3
@@ -148,7 +158,8 @@ def save_recent(file_path: Path, text: str) -> None:
 # Gemini orqali fakt generatsiya qilish
 # ----------------------------------------------------------------------------
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+# Timeout bo'lmasa band model javobsiz ~25 daqiqa osilib qoladi — 60s'dan keyin zaxira modelga o'tiladi
+gemini_client = genai.Client(api_key=GEMINI_API_KEY, http_options=genai_types.HttpOptions(timeout=60_000))
 
 
 SPLIT_MARKER = "|||"
@@ -441,6 +452,197 @@ def build_flex_post_text() -> tuple[str, str]:
 
 
 # ----------------------------------------------------------------------------
+# Saytdan dars: my-harvard-path saytidagi maqola yoki lug'atdan qisqa dars
+# ----------------------------------------------------------------------------
+
+SITE_URL = os.getenv("SITE_URL", "https://my-harvard-path.pages.dev")
+
+# Saytdagi maqolalar (maqolalar.html'dagi ro'yxat). Yangi maqola qo'shilsa shu yerga ham qo'shing.
+SITE_ARTICLES = [
+    "uyqu", "diqqat", "eslash", "takrorlash", "stress", "mindset", "odatlar",
+    "multitasking", "oqish-uslublari", "qolda-yozish", "sport-miya", "motsart",
+    "zefir-testi", "ikki-tillilik", "ingliz-tili", "ota-onalar", "harvard-yoli",
+]
+
+# vocab.js'dagi { w: "...", p: "...", uz: "...", ex: "...", cat: "..." } yozuvlari
+VOCAB_RE = re.compile(
+    r'\{\s*w:\s*"((?:[^"\\]|\\.)*)",\s*p:\s*"((?:[^"\\]|\\.)*)",\s*uz:\s*"((?:[^"\\]|\\.)*)",'
+    r'\s*ex:\s*"((?:[^"\\]|\\.)*)"'
+)
+
+HTTP_HEADERS = {"User-Agent": "MyHarvardPathBot/1.0 (+https://t.me/MyHarvardPath)"}
+
+
+def fetch_text(url: str) -> str:
+    resp = httpx.get(url, headers=HTTP_HEADERS, timeout=20, follow_redirects=True)
+    resp.raise_for_status()
+    return resp.text
+
+
+def html_to_text(page: str) -> str:
+    """Sahifadan asosiy matnni ajratadi (<article>/<main> bo'lsa faqat shu qism)."""
+    page = re.sub(r"(?is)<(script|style|nav|header|footer|svg)\b.*?</\1>", " ", page)
+    match = re.search(r"(?is)<(article|main)\b.*?</\1>", page)
+    if match:
+        page = match.group(0)
+    text = html.unescape(re.sub(r"(?s)<[^>]+>", " ", page))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def build_vocab_post() -> tuple[str, str]:
+    recent = set(load_recent(RECENT_LESSONS_FILE))
+    words = VOCAB_RE.findall(fetch_text(f"{SITE_URL}/vocab.js"))
+    if not words:
+        raise ValueError("vocab.js'dan so'z topilmadi")
+    fresh = [w for w in words if f"vocab:{w[0]}" not in recent] or words
+    word, part, uz, example = (s.replace('\\"', '"').replace("\\'", "'") for s in random.choice(fresh))
+
+    post_html = (
+        f"🔤 <b>Kunning so'zi: {html.escape(word)}</b> <i>({html.escape(part)})</i>\n\n"
+        f"🇺🇿 {html.escape(uz)}\n\n"
+        f"💬 <i>{html.escape(example)}</i>\n\n"
+        f"👉 <a href=\"{SITE_URL}/lugat-va-iboralar\">Ko'proq so'zlar va flashcard'lar</a>\n\n"
+        f"#KunningSozi\n"
+        f"🔤 {html.escape(CHANNEL_USERNAME)}"
+    )
+    return post_html, f"vocab:{word}"
+
+
+def build_article_lesson_post() -> tuple[str, str]:
+    recent = load_recent(RECENT_LESSONS_FILE)
+    fresh = [s for s in SITE_ARTICLES if f"article:{s}" not in recent] or SITE_ARTICLES
+    slug = random.choice(fresh)
+    url = f"{SITE_URL}/{slug}"
+    page = fetch_text(url)
+    title_match = re.search(r"(?is)<title>(.*?)</title>", page)
+    title = html.unescape(title_match.group(1)).split("|")[0].split("—")[0].strip() if title_match else slug
+    body = html_to_text(page)[:7000]
+
+    prompt = f"""Sen @MyHarvardPath Telegram kanali uchun qisqa "dars" post yozasan.
+Auditoriya: Harvard/top universitetlarga tayyorlanayotgan O'zbekistonlik o'quvchilar.
+
+Quyida saytimizdagi "{title}" maqolasining matni berilgan. Undan BITTA eng foydali, amaliy
+g'oyani tanlab, o'zbek tilida (lotin) qisqa dars yoz:
+- "lesson": 3-5 qisqa jumla — g'oya nima va nega ishlaydi. Faqat maqoladagi ma'lumotga
+  tayan, o'zingdan raqam, tadqiqot yoki fakt QO'SHMA. 1 ta eng kalit iborani **so'z** shaklida belgila.
+- "action": bugun sinab ko'rish mumkin bo'lgan 1 ta aniq, kichik qadam (1 jumla).
+Ohang: samimiy, do'stona, ortiqcha rasmiyatsiz.
+
+{EMOJI_BAN_NOTE}
+
+Javobni FAQAT JSON formatida qaytar: {{"lesson": "...", "action": "..."}}
+
+MAQOLA MATNI:
+{body}"""
+    data = json.loads(call_gemini(prompt, json_mode=True).text)
+    lesson_html = apply_bold_markup(html.escape(str(data["lesson"]).strip()))
+    action = html.escape(str(data["action"]).strip())
+
+    post_html = (
+        f"📚 <b>Saytdan dars: {html.escape(title)}</b>\n\n"
+        f"{lesson_html}\n\n"
+        f"✅ <b>Bugun sinab ko'r:</b> {action}\n\n"
+        f"👉 <a href=\"{url}\">To'liq maqolani o'qish</a>\n\n"
+        f"#Dars\n"
+        f"📚 {html.escape(CHANNEL_USERNAME)}"
+    )
+    return post_html, f"article:{slug}"
+
+
+def build_lesson_post() -> tuple[str, str]:
+    """Tasodifan maqoladan dars yoki "Kunning so'zi". Maqola ishlamasa lug'atga o'tadi."""
+    if random.random() < 0.6:
+        try:
+            return build_article_lesson_post()
+        except Exception as e:
+            logger.warning("Maqoladan dars tayyorlab bo'lmadi (%s) — lug'at posti yuboriladi", e)
+    return build_vocab_post()
+
+
+# ----------------------------------------------------------------------------
+# Real yangiliklar: universitetlarning rasmiy RSS lentalaridan
+# ----------------------------------------------------------------------------
+
+NEWS_FEEDS = {
+    "Harvard Gazette": "https://news.harvard.edu/gazette/feed/",
+    "MIT News": "https://news.mit.edu/rss/feed",
+    "Princeton University": "https://www.princeton.edu/feed",
+}
+NEWS_MAX_AGE_DAYS = 7
+
+
+def fetch_news_items() -> list[dict]:
+    items: list[dict] = []
+    now = datetime.now(ZoneInfo("UTC"))
+    for source, url in NEWS_FEEDS.items():
+        try:
+            root = ET.fromstring(fetch_text(url).encode("utf-8"))
+        except (httpx.HTTPError, ET.ParseError) as e:
+            logger.warning("%s lentasini o'qib bo'lmadi: %s", source, e)
+            continue
+        for item in root.iter("item"):
+            link = (item.findtext("link") or "").strip()
+            title = html.unescape(item.findtext("title") or "").strip()
+            if not link or not title:
+                continue
+            try:
+                published = parsedate_to_datetime(item.findtext("pubDate") or "")
+                if (now - published).days > NEWS_MAX_AGE_DAYS:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            summary = html_to_text(item.findtext("description") or "")[:400]
+            items.append({"source": source, "title": title, "link": link, "summary": summary})
+    return items
+
+
+def build_news_post() -> tuple[str, str] | None:
+    """Eng mos yangilikdan post tayyorlaydi. Mos yangilik bo'lmasa None qaytaradi."""
+    recent = set(load_recent(RECENT_NEWS_FILE))
+    items = [it for it in fetch_news_items() if it["link"] not in recent][:40]
+    if not items:
+        return None
+
+    candidates = "\n".join(
+        f"[{i}] ({it['source']}) {it['title']} — {it['summary']}" for i, it in enumerate(items)
+    )
+    prompt = f"""Sen @MyHarvardPath Telegram kanali uchun yangilik muharririsan.
+Auditoriya: Harvard/top AQSh universitetlariga tayyorlanayotgan O'zbekistonlik o'quvchilar.
+
+Quyidagi rasmiy universitet yangiliklaridan shu auditoriya uchun ENG qiziqarli va foydali
+BITTASINI tanla (qabul, talaba hayoti, stipendiya, o'qish usullari, yoshlar uchun qiziq kashfiyot).
+Siyosat, mojaro, o'lim xabarlari, tor ilmiy yoki faqat mahalliy voqealarni TANLAMA. Hech biri
+mos kelmasa "index": -1 qaytar.
+
+Tanlangan yangilik uchun o'zbek tilida (lotin) yoz:
+- "headline": qisqa, qiziqtiradigan sarlavha (max 90 belgi)
+- "summary": 2-3 jumla — nima bo'ldi. FAQAT berilgan sarlavha va tavsifga tayan, hech narsa to'qima.
+- "why": 1 jumla — bu o'quvchi uchun nega qiziq/foydali.
+
+{EMOJI_BAN_NOTE}
+
+Javobni FAQAT JSON formatida qaytar: {{"index": 0, "headline": "...", "summary": "...", "why": "..."}}
+
+YANGILIKLAR:
+{candidates}"""
+    data = json.loads(call_gemini(prompt, json_mode=True).text)
+    index = int(data.get("index", -1))
+    if not 0 <= index < len(items):
+        return None
+    item = items[index]
+
+    post_html = (
+        f"📰 <b>{html.escape(str(data['headline']).strip())}</b>\n\n"
+        f"{html.escape(str(data['summary']).strip())}\n\n"
+        f"💡 {html.escape(str(data['why']).strip())}\n\n"
+        f"🔗 Manba: <a href=\"{html.escape(item['link'], quote=True)}\">{html.escape(item['source'])}</a>\n\n"
+        f"#Yangilik\n"
+        f"📰 {html.escape(CHANNEL_USERNAME)}"
+    )
+    return post_html, item["link"]
+
+
+# ----------------------------------------------------------------------------
 # Poll/viktorina generatsiya qilish
 # ----------------------------------------------------------------------------
 
@@ -653,6 +855,76 @@ async def send_flex_countdown_post() -> None:
         ping_healthcheck(success=False)
 
 
+async def send_generated_post(kind: str, build, recent_file: Path) -> None:
+    """Dars/yangilik postlari uchun umumiy yuboruvchi. build() None qaytarsa post o'tkazib yuboriladi."""
+    bot = Bot(token=BOT_TOKEN)
+    if posted_manually_today(kind):
+        logger.info("Bugun '%s' posti qo'lda joylangan — avtomatik post o'tkazib yuborildi", kind)
+        await notify_admin(bot, f"⏭ Avtomatik '{kind}' posti o'tkazib yuborildi — bugun u qo'lda joylangan.")
+        ping_healthcheck(success=True)
+        return
+    logger.info("Yangi '%s' post tayyorlanmoqda.", kind)
+
+    try:
+        result = build()
+    except Exception as e:
+        logger.error("'%s' post tayyorlashda xatolik: %s", kind, e)
+        await notify_admin(bot, f"❌ '{kind}' post tayyorlashda xatolik: {e}")
+        ping_healthcheck(success=False)
+        return
+    if result is None:
+        logger.info("'%s': mos kontent topilmadi — bugun post yo'q", kind)
+        await notify_admin(bot, f"⏭ '{kind}': mos kontent topilmadi, bugun post yuborilmadi.")
+        ping_healthcheck(success=True)
+        return
+    post_html, recent_key = result
+
+    try:
+        await bot.send_message(chat_id=CHANNEL_ID, text=post_html, parse_mode=ParseMode.HTML)
+        save_recent(recent_file, recent_key)
+        logger.info("'%s' post muvaffaqiyatli yuborildi: %s", kind, CHANNEL_ID)
+        await notify_admin(
+            bot,
+            f"✅ '{kind}' post yuborildi ({datetime.now():%Y-%m-%d %H:%M})\n\n{post_html}",
+            parse_mode=ParseMode.HTML,
+        )
+        ping_healthcheck(success=True)
+    except TelegramError as e:
+        logger.error("Telegramga '%s' post yuborishda xatolik: %s", kind, e)
+        await notify_admin(bot, f"❌ Telegramga '{kind}' post yuborishda xatolik: {e}")
+        ping_healthcheck(success=False)
+
+
+async def send_lesson_post() -> None:
+    await send_generated_post("lesson", build_lesson_post, RECENT_LESSONS_FILE)
+
+
+async def send_news_post() -> None:
+    await send_generated_post("news", build_news_post, RECENT_NEWS_FILE)
+
+
+POST_SENDERS = {
+    "facts": send_fact_post,
+    "flex": send_flex_countdown_post,
+    "lesson": send_lesson_post,
+    "news": send_news_post,
+}
+
+
+def today_weekday() -> int:
+    return datetime.now(ZoneInfo(TIMEZONE)).weekday()
+
+
+async def send_morning_post() -> None:
+    """09:00 — haftalik jadval bo'yicha fact yoki saytdan dars."""
+    await POST_SENDERS[MORNING_PLAN[today_weekday()]]()
+
+
+async def send_evening_post() -> None:
+    """20:00 — haftalik jadval bo'yicha flex yoki real yangilik."""
+    await POST_SENDERS[EVENING_PLAN[today_weekday()]]()
+
+
 async def send_poll_post() -> None:
     poll_type = random.choice(["quiz", "regular"])
     logger.info("Yangi poll tayyorlanmoqda. Turi: %s", poll_type)
@@ -714,19 +986,19 @@ def setup_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     for hour, minute in POST_TIMES:
         scheduler.add_job(
-            send_fact_post,
+            send_morning_post,
             trigger=CronTrigger(hour=hour, minute=minute, timezone=TIMEZONE),
             id=f"post_{hour:02d}{minute:02d}",
         )
-        logger.info("Fact post vaqti belgilandi: %02d:%02d (%s)", hour, minute, TIMEZONE)
+        logger.info("Ertalabki post (fact/dars) vaqti belgilandi: %02d:%02d (%s)", hour, minute, TIMEZONE)
 
     flex_hour, flex_minute = FLEX_POST_TIME
     scheduler.add_job(
-        send_flex_countdown_post,
+        send_evening_post,
         trigger=CronTrigger(hour=flex_hour, minute=flex_minute, timezone=TIMEZONE),
         id=f"flex_{flex_hour:02d}{flex_minute:02d}",
     )
-    logger.info("Flex post vaqti belgilandi: %02d:%02d (%s)", flex_hour, flex_minute, TIMEZONE)
+    logger.info("Kechki post (flex/yangilik) vaqti belgilandi: %02d:%02d (%s)", flex_hour, flex_minute, TIMEZONE)
 
     # ESLATMA: poll/viktorina endi bu yerda REJALASHTIRILMAYDI — u Cloudflare
     # Worker'ning o'z cron trigger'i orqali (admin-worker/src/index.ts) ADMIN_BOT_TOKEN
